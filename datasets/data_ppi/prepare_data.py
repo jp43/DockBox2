@@ -76,12 +76,12 @@ for kdx, sg in enumerate(subgraphs):
         else:
             continue
         sets[setname]['Graph_nodes'].append(sg)
-        sets[setname]['Graph_feats'].append([G.nodes[idx]['feature'] for idx in sg])
+        sets[setname]['Graph_feats'].append(np.array([G.nodes[idx]['feature'] for idx in sg]))
 
         adj = compute_adj_from_subgraph(G, sg)
         assert((adj == adj.transpose()).all())
         sets[setname]['Graph_adj_list'].append(adj)
-        sets[setname]['Graph_labels'].append([G.nodes[idx]['label'] for idx in sg])
+        sets[setname]['Graph_labels'].append(np.array([G.nodes[idx]['label'] for idx in sg]))
         sets[setname]['Graph_degree'].append([len(list(G.neighbors(idx))) for idx in sg])
     else:
         continue
@@ -91,7 +91,7 @@ for setname in sets:
     sets[setname]['feats'] = feats
     sets[setname]['id_map'] = id_map
     sets[setname]['class_map'] = class_map
-    sets[setname]['max_nrof_nodes'] = 10000
+    sets[setname]['max_nrof_nodes'] = max([len(sg) for sg in sets[setname]['Graph_nodes']])
  
     with open(setname+'_ppi.pickle', "wb") as ff:
         pickle.dump(sets[setname], ff)
