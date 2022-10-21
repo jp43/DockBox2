@@ -10,9 +10,17 @@ import tensorflow as tf
 import loss
 import utils
 
+from aggregators import *
+
 depth = 2
+activation = 'sigmoid'
 nrof_neigh_per_batch = 25
-activiation = 'sigmoid'
+
+# aggregator options
+aggregator_options = {'aggregator_shape': 50,
+'use_concat': True,
+'aggregator_type': 'PoolAggregator',
+'aggregator_type_options': {'activation': 'leaky_relu', 'pool_op': 'sigmoid'}}
 
 class GraphDataset(object):
 
@@ -69,12 +77,9 @@ class GraphDataset(object):
         return tf.py_function(self.__sample, [graph_id, depth, nrof_neigh_per_batch], [tf.float32, tf.int32,
                                    tf.int32, tf.float32, tf.int32, tf.int32])
 
-class GraphSage(tf.keras.models.Model):
+class GraphSAGE(tf.keras.models.Model):
 
-    def __init__(self, in_shape, out_shape, activation,
-                 aggregator_layers,
-                 loss_cls, accuracy_cls,
-                 train_cfg, test_cfg):
+    def __init__(self, in_shape, out_shape, activation, aggregator_options):
         super(GraphSAGE, self).__init__()
 
         self.in_shape = in_shape
@@ -84,20 +89,30 @@ class GraphSage(tf.keras.models.Model):
         if self.activation is not None:
             self.activation = getattr(tf.nn, activation)
 
-        self.aggregator_layers = build_aggregator_layers(aggregator_layers)
+        self.aggregator_options = aggregator_options
+        self.aggregator_options['aggregator_type_options']['use_concat'] = self.aggregator_options['use_concat']
 
-        self.loss_graph = build_loss(loss_cls)
+    def build(self):
+        sys._getframe(1).f_locals.update(self.aggregator_options)
 
-        self.accuracy_cls = accuracy_cls
-        self.accuracy = build_accuracy(accuracy_cls)
+        self.output_layer = tf.keras.layers.Dense(self.out_shape, input_shape=((use_concat+1)*aggregator_shape,), name='output_layer')
+        self.output_layer.build(((use_concat+1)*aggregator_shape,))
 
-        self.train_cfg = train_cfg
-        self.test_cfg = test_cfg
+        self.aggregator_layers = []
+        for idx in range(depth):
+            # TODO: possibility to create different classes of aggregators
+            aggregator = PoolAggregator(**aggregator_type_options)
+        
+            if idx == 0:
+                in_shape = self.in_shape
+            else:
+                in_shape = (use_concat+1)*aggregator_shape
 
+            aggregator.build(in_shape, aggregator_shape)
+            self.aggregator_layers.append(aggregator)
 
-    def build(self, *args):
-        super(GraphSage, self).build()
- 
+        super(GraphSAGE, self).build(())
+
 train = GraphDataset('datasets/data_ppi/train_ppi.pickle')
 
 data_slices = np.random.permutation(train.ngraphs)
@@ -105,5 +120,8 @@ data_loader = tf.data.Dataset.from_tensor_slices((data_slices))
 
 data_loader = data_loader.map(**{'num_parallel_calls': 4, 'map_func': lambda x: train.sample(x, depth, nrof_neigh_per_batch)})
 
-#model = GraphSage(2*train.nfeats, train.nlabels, activation)
+model = GraphSAGE(train.nfeats, train.nlabels, activation, aggregator_options)
+model.build()
+
+print(model.summary())
 
