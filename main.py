@@ -5,9 +5,10 @@ import sys
 import argparse
 import pickle
 import numpy as np
-import tensorflow as tf
 
-import loss
+import tensorflow as tf
+import tensorflow_addons as tfa
+
 import utils
 
 from aggregators import *
@@ -92,6 +93,9 @@ class GraphSAGE(tf.keras.models.Model):
         self.aggregator_options = aggregator_options
         self.aggregator_options['aggregator_type_options']['use_concat'] = self.aggregator_options['use_concat']
 
+        self.loss_function = tf.keras.losses.BinaryCrossentropy()
+        self.accuracy = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
+
     def build(self):
         sys._getframe(1).f_locals.update(self.aggregator_options)
 
@@ -123,5 +127,5 @@ data_loader = data_loader.map(**{'num_parallel_calls': 4, 'map_func': lambda x: 
 model = GraphSAGE(train.nfeats, train.nlabels, activation, aggregator_options)
 model.build()
 
-print(model.summary())
+model.summary()
 
