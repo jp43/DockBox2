@@ -25,29 +25,26 @@ class PoolAggregator(tf.keras.layers.Layer):
         self.neigh_layer.build((output_shape, ))
 
         self.bn2 = tf.keras.layers.BatchNormalization()
-        if self.use_concat:
-            self.bn2.build((None, 2*output_shape))
-        else:
-            self.bn2.build((None, output_shape))
+        self.bn2.build((None, (self.use_concat+1)*output_shape))
 
         super(PoolAggregator, self).build(())
 
-    def call(self, self_nodes, neigh_nodes, len_adj_nodes, training=True):
+    def call(self, self_feats, neigh_feats, training=True):
 
-        neigh = self.transform_node_weight(neigh_nodes)
-        neigh_nodes_upd = self.bn1(tf.reshape(neigh, [-1, int(neigh.shape[-1])]), training=training)
-        neigh = tf.reshape(neigh_nodes_upd, list(neigh.shape))
+        neigh = self.transform_node_weight(neigh_feats)
+        neigh_feats_upd = self.bn1(tf.reshape(neigh, [-1, int(neigh.shape[-1])]), training=training)
+        neigh = tf.reshape(neigh_feats_upd, list(neigh.shape))
         neigh = getattr(tf, self.pool_op)(neigh, axis=1)
 
-        neigh = self.neigh_layer(neigh)
-        self_nodes = self.self_layer(self_nodes)
+        self_feats = self.self_layer(self_feats)
+        neigh_feats = self.neigh_layer(neigh)
 
         if self.use_concat:
-            output = tf.concat([self_nodes, neigh], axis=1)
+            self_feats = tf.concat([self_feats, neigh], axis=1)
         else:
-            output = tf.add_n([self_nodes, neigh])
+            self_feats = tf.add_n([self_feats, neigh])
 
-        output = self.bn2(output, training=training)
-        output = self.activation(output)
+        self_feats = self.bn2(self_feats, training=training)
+        self_feats = self.activation(self_feats)
 
-        return output
+        return self_feats

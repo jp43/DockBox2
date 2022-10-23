@@ -13,15 +13,18 @@ import utils
 
 from aggregators import *
 
+total_epochs = 1
+
 depth = 2
 activation = 'sigmoid'
 nrof_neigh_per_batch = 25
+batch = 2
 
 # aggregator options
 aggregator_options = {'aggregator_shape': 50,
 'use_concat': True,
 'aggregator_type': 'PoolAggregator',
-'aggregator_type_options': {'activation': 'leaky_relu', 'pool_op': 'sigmoid'}}
+'aggregator_type_options': {'activation': 'leaky_relu', 'pool_op': 'reduce_max'}}
 
 class GraphDataset(object):
 
@@ -41,7 +44,7 @@ class GraphDataset(object):
         self.ngraphs = len(data['Graph_nodes'])
 
         self.graph_size = []
-        for i_g, graph in enumerate(data['Graph_nodes']):
+        for kdx, graph in enumerate(data['Graph_nodes']):
             self.graph_size.append(len(graph))
 
     def __sample(self, graph_id, depth, nrof_neigh_per_batch):
@@ -80,7 +83,7 @@ class GraphDataset(object):
 
 class GraphSAGE(tf.keras.models.Model):
 
-    def __init__(self, in_shape, out_shape, activation, aggregator_options):
+    def __init__(self, in_shape, out_shape, activation, depth, nrof_neigh_per_batch, aggregator_options):
         super(GraphSAGE, self).__init__()
 
         self.in_shape = in_shape
@@ -89,6 +92,9 @@ class GraphSAGE(tf.keras.models.Model):
         self.activation = activation
         if self.activation is not None:
             self.activation = getattr(tf.nn, activation)
+
+        self.depth = depth
+        self.nrof_neigh_per_batch = nrof_neigh_per_batch
 
         self.aggregator_options = aggregator_options
         self.aggregator_options['aggregator_type_options']['use_concat'] = self.aggregator_options['use_concat']
@@ -103,7 +109,7 @@ class GraphSAGE(tf.keras.models.Model):
         self.output_layer.build(((use_concat+1)*aggregator_shape,))
 
         self.aggregator_layers = []
-        for idx in range(depth):
+        for idx in range(self.depth):
             # TODO: possibility to create different classes of aggregators
             aggregator = PoolAggregator(**aggregator_type_options)
         
@@ -117,15 +123,64 @@ class GraphSAGE(tf.keras.models.Model):
 
         super(GraphSAGE, self).build(())
 
+    def call(self, feats, graph_size, neigh_indices, adj_mask, nneigh, labels, training=True):
+
+        nrof_graphs = len(graph_size) # number of graphs in the batch
+        graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
+
+        # initialize self_feats
+        self_feats = feats[0][:graph_size[0]]
+        for kdx in range(1, nrof_graphs):
+             self_feats = tf.concat([self_feats, feats[kdx][:graph_size[kdx]]], axis=0)
+
+        for idx in range(self.depth):
+            # construct neigh_feats form self_feats
+            for kdx in range(nrof_graphs):
+                graph_self_feats = tf.gather(self_feats, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+                graph_neigh_feats = tf.gather(graph_self_feats, neigh_indices[kdx][idx][:graph_size[kdx],:])
+
+                # needs to exclude zero-padded nodes
+                graph_adj_mask = adj_mask[kdx][idx][:graph_size[kdx],:]
+                graph_neigh_feats = tf.multiply(tf.expand_dims(graph_adj_mask, axis=2), graph_neigh_feats)
+
+                if kdx == 0:
+                    neigh_feats = graph_neigh_feats
+                else:
+                    neigh_feats = tf.concat([neigh_feats, graph_neigh_feats], axis=0)
+
+            self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, training=training)
+        self_feats = tf.math.l2_normalize(self_feats, axis=1)
+
+        embedded_feats = self.output_layer(self_feats)
+
+        predictions = self.activation(self_feats)
+        output = predictions
+
+        if len(labels.shape) > 1:
+            batch_labels = labels[0][:graph_size[0],:]
+            for kdx in range(1, nrof_graphs):
+                batch_labels = tf.concat([batch_labels, labels[kdx][:graph_size[kdx],:]], axis=0)
+        else:
+            batch_labels = np.expand_dims(labels, 1)
+
+        #TODO: needs to add loss function accuracy
+
 train = GraphDataset('datasets/data_ppi/train_ppi.pickle')
 
 data_slices = np.random.permutation(train.ngraphs)
 data_loader = tf.data.Dataset.from_tensor_slices((data_slices))
 
-data_loader = data_loader.map(**{'num_parallel_calls': 4, 'map_func': lambda x: train.sample(x, depth, nrof_neigh_per_batch)})
+data_loader = data_loader.map(**{'num_parallel_calls': 1, 'map_func': lambda x: train.sample(x, depth, nrof_neigh_per_batch)})
+data_loader = data_loader.batch(batch)
 
-model = GraphSAGE(train.nfeats, train.nlabels, activation, aggregator_options)
+model = GraphSAGE(train.nfeats, train.nlabels, activation, depth, nrof_neigh_per_batch, aggregator_options)
 model.build()
 
 model.summary()
+
+for epoch in range(total_epochs):
+    for idx, data_batch in enumerate(data_loader):
+
+        with tf.GradientTape() as tape:
+            model(*data_batch, training=True)
 
