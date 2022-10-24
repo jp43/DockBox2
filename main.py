@@ -2,6 +2,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import sys
+import time
 import argparse
 import pickle
 import numpy as np
@@ -10,21 +11,28 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 
 import utils
-
 from aggregators import *
 
-total_epochs = 1
+total_epochs = 10
 
+# minibatch options
+num_parallel_calls = 4
+batch_size = 2
+
+# model options
 depth = 2
 activation = 'sigmoid'
 nrof_neigh_per_batch = 25
-batch = 2
 
 # aggregator options
 aggregator_options = {'aggregator_shape': 50,
 'use_concat': True,
 'aggregator_type': 'PoolAggregator',
 'aggregator_type_options': {'activation': 'leaky_relu', 'pool_op': 'reduce_max'}}
+
+# optimizer options
+optimizer_type = 'Adam'
+lr_schedule = {'initial_learning_rate': 1e-2, 'decay_steps': 1000, 'decay_rate':0.99, 'staircase':True}
 
 class GraphDataset(object):
 
@@ -100,7 +108,12 @@ class GraphSAGE(tf.keras.models.Model):
         self.aggregator_options['aggregator_type_options']['use_concat'] = self.aggregator_options['use_concat']
 
         self.loss_function = tf.keras.losses.BinaryCrossentropy()
-        self.accuracy = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
+
+        self.accuracy = tf.keras.metrics.Accuracy()
+
+        self.precision = tf.keras.metrics.Precision()
+        self.recall = tf.keras.metrics.Recall()
+        self.f1_score = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
 
     def build(self):
         sys._getframe(1).f_locals.update(self.aggregator_options)
@@ -134,12 +147,12 @@ class GraphSAGE(tf.keras.models.Model):
              self_feats = tf.concat([self_feats, feats[kdx][:graph_size[kdx]]], axis=0)
 
         for idx in range(self.depth):
-            # construct neigh_feats form self_feats
+            # construct neigh_feats from self_feats
             for kdx in range(nrof_graphs):
                 graph_self_feats = tf.gather(self_feats, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
                 graph_neigh_feats = tf.gather(graph_self_feats, neigh_indices[kdx][idx][:graph_size[kdx],:])
 
-                # needs to exclude zero-padded nodes
+                # needed to exclude zero-padded nodes
                 graph_adj_mask = adj_mask[kdx][idx][:graph_size[kdx],:]
                 graph_neigh_feats = tf.multiply(tf.expand_dims(graph_adj_mask, axis=2), graph_neigh_feats)
 
@@ -152,9 +165,7 @@ class GraphSAGE(tf.keras.models.Model):
         self_feats = tf.math.l2_normalize(self_feats, axis=1)
 
         embedded_feats = self.output_layer(self_feats)
-
-        predictions = self.activation(self_feats)
-        output = predictions
+        predicted_labels = self.activation(embedded_feats)
 
         if len(labels.shape) > 1:
             batch_labels = labels[0][:graph_size[0],:]
@@ -163,24 +174,75 @@ class GraphSAGE(tf.keras.models.Model):
         else:
             batch_labels = np.expand_dims(labels, 1)
 
-        #TODO: needs to add loss function accuracy
+        results = self.call_accuracy(predicted_labels, batch_labels)
+        results.update(self.call_loss(predicted_labels, batch_labels, regularization=True))
+        return results
+
+    def call_accuracy(self, predicted_labels, labels):
+
+        accuracy = self.accuracy(labels, predicted_labels)
+
+        precision = self.precision(labels, predicted_labels)
+        recall = self.recall(labels, predicted_labels)
+        f1_score = self.f1_score(labels, predicted_labels)
+
+        return {'precision': precision, 'recall': recall, 'f1_score': f1_score}
+
+    def call_loss(self, predicted_labels, labels, regularization=True):
+        loss = self.loss_function(labels, predicted_labels)
+
+        if regularization:
+            reg_loss = 0.0005 * tf.add_n([tf.nn.l2_loss(w) for w in self.trainable_variables])
+            total_loss = loss + reg_loss
+            return {'total_loss': loss + reg_loss, 'loss': loss, 'reg_loss': reg_loss}
+        else:
+            return {'total_loss': loss, 'loss': loss}
+
+
+def get_dataloader_from_dataset(dataset, num_parallel_calls=1, batch_size=1):
+    """Create dataloader to be fed to model"""
+
+    data_slices = np.random.permutation(dataset.ngraphs)
+    data_loader = tf.data.Dataset.from_tensor_slices((data_slices))
+
+    data_loader = data_loader.map(**{'num_parallel_calls': 1, 'map_func': lambda x: dataset.sample(x, depth, nrof_neigh_per_batch)})
+    data_loader = data_loader.batch(batch_size=batch_size)
+
+    return data_loader
 
 train = GraphDataset('datasets/data_ppi/train_ppi.pickle')
+data_loader_train = get_dataloader_from_dataset(train, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
 
-data_slices = np.random.permutation(train.ngraphs)
-data_loader = tf.data.Dataset.from_tensor_slices((data_slices))
+valid = GraphDataset('datasets/data_ppi/val_ppi.pickle')
+data_loader_valid = get_dataloader_from_dataset(valid, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
 
-data_loader = data_loader.map(**{'num_parallel_calls': 1, 'map_func': lambda x: train.sample(x, depth, nrof_neigh_per_batch)})
-data_loader = data_loader.batch(batch)
 
 model = GraphSAGE(train.nfeats, train.nlabels, activation, depth, nrof_neigh_per_batch, aggregator_options)
 model.build()
 
 model.summary()
 
+# set optimizer
+optimizer_class = getattr(tf.keras.optimizers, optimizer_type)
+optimizer = optimizer_class(learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(**lr_schedule))
+
 for epoch in range(total_epochs):
-    for idx, data_batch in enumerate(data_loader):
+    print("Epoch %i"%epoch)
+
+    for idx, data_batch in enumerate(data_loader_train):
 
         with tf.GradientTape() as tape:
-            model(*data_batch, training=True)
+            results = model(*data_batch, training=True)
 
+        print(''.join(['%s: %f\t' % (key, value) for key, value in results.items()]))
+
+        grads = tape.gradient(results['total_loss'], model.trainable_weights)
+        optimizer.apply_gradients(zip(grads, model.trainable_weights))
+
+    for idx, data_batch in enumerate(data_loader_valid):
+
+        with tf.GradientTape() as tape:
+            results = model(*data_batch, training=False)
+
+        print(''.join(['%s_val: %f\t' % (key, value) for key, value in results.items()]))
+    time.sleep(1)
