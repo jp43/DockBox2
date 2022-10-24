@@ -32,7 +32,7 @@ aggregator_options = {'aggregator_shape': 50,
 
 # optimizer options
 optimizer_type = 'Adam'
-lr_schedule = {'initial_learning_rate': 1e-2, 'decay_steps': 1000, 'decay_rate':0.99, 'staircase':True}
+lr_schedule = {'initial_learning_rate': 1e-2, 'decay_steps': 1000, 'decay_rate': 0.99, 'staircase':True}
 
 class GraphDataset(object):
 
@@ -179,7 +179,6 @@ class GraphSAGE(tf.keras.models.Model):
         return results
 
     def call_accuracy(self, predicted_labels, labels):
-
         accuracy = self.accuracy(labels, predicted_labels)
 
         precision = self.precision(labels, predicted_labels)
@@ -199,23 +198,23 @@ class GraphSAGE(tf.keras.models.Model):
             return {'total_loss': loss, 'loss': loss}
 
 
-def get_dataloader_from_dataset(dataset, num_parallel_calls=1, batch_size=1):
-    """Create dataloader to be fed to model"""
+def generate_data_loader(dataset, num_parallel_calls=1, batch_size=1):
+    """Create data loader to be fed to model"""
 
     data_slices = np.random.permutation(dataset.ngraphs)
     data_loader = tf.data.Dataset.from_tensor_slices((data_slices))
 
-    data_loader = data_loader.map(**{'num_parallel_calls': 1, 'map_func': lambda x: dataset.sample(x, depth, nrof_neigh_per_batch)})
+    data_loader = data_loader.map(**{'num_parallel_calls': num_parallel_calls, 'map_func': lambda x: dataset.sample(x, depth, nrof_neigh_per_batch)})
     data_loader = data_loader.batch(batch_size=batch_size)
 
     return data_loader
 
+
 train = GraphDataset('datasets/data_ppi/train_ppi.pickle')
-data_loader_train = get_dataloader_from_dataset(train, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
+data_loader_train = generate_data_loader(train, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
 
 valid = GraphDataset('datasets/data_ppi/val_ppi.pickle')
-data_loader_valid = get_dataloader_from_dataset(valid, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
-
+data_loader_valid = generate_data_loader(valid, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
 
 model = GraphSAGE(train.nfeats, train.nlabels, activation, depth, nrof_neigh_per_batch, aggregator_options)
 model.build()
