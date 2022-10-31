@@ -16,16 +16,16 @@ from aggregators import *
 total_epochs = 10
 
 # minibatch options
-num_parallel_calls = 4
 batch_size = 2
+num_parallel_calls = 4
 
 # model options
-depth = 5
+depth = 2
 activation = 'sigmoid'
 nrof_neigh_per_batch = 25
 
 # aggregator options
-aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'mean', 'activation': 'leaky_relu'}
+aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'pooling', 'activation': 'leaky_relu'}
 
 if 'shape' not in aggregator_options:
     sys.exit("Aggregation shape is mandatory in aggregator_options!")
@@ -33,6 +33,13 @@ if 'shape' not in aggregator_options:
 for option in default_aggregator_options:
     if option not in aggregator_options:
         aggregator_options[option] = default_aggregator_options[option]
+
+# attention options
+attention_options = {'shape': 50, 'activation': 'sigmoid'}
+
+for option in default_attention_options:
+    if option not in attention_options:
+        attention_options[option] = default_attention_options[option]
 
 # optimizer options
 optimizer_type = 'Adam'
@@ -95,7 +102,7 @@ class GraphDataset(object):
 
 class GraphSAGE(tf.keras.models.Model):
 
-    def __init__(self, in_shape, out_shape, activation, depth, nrof_neigh_per_batch, aggregator_options):
+    def __init__(self, in_shape, out_shape, activation, depth, nrof_neigh_per_batch, aggregator_options, attention_options=None):
         super(GraphSAGE, self).__init__()
 
         self.in_shape = in_shape
@@ -109,6 +116,7 @@ class GraphSAGE(tf.keras.models.Model):
         self.nrof_neigh_per_batch = nrof_neigh_per_batch
 
         self.aggregator_options = aggregator_options
+        self.attention_options = attention_options
 
         self.loss_function = tf.keras.losses.BinaryCrossentropy()
 
@@ -126,20 +134,22 @@ class GraphSAGE(tf.keras.models.Model):
         aggregator_activation = self.aggregator_options['activation']
         use_concat = self.aggregator_options['use_concat']
 
-        attention_shape = self.aggregator_options['attention_shape']
-        attention_activation = self.aggregator_options['attention_activation']
-
         self.aggregator_layers = []
         for idx in range(self.depth):
-            aggregator_layer = Aggregator(aggregator_type, aggregator_activation, use_concat, attention_activation=attention_activation)
+            aggregator_layer = Aggregator(aggregator_type, aggregator_activation, use_concat, attention_options=self.attention_options)
 
             if idx == 0:
                 in_shape = self.in_shape
             else:
                 in_shape = (use_concat+1)*aggregator_shape
 
-            if aggregator_type == 'attention' and attention_shape is None:
-                attention_shape = in_shape
+            if aggregator_type == 'attention':
+                if 'attention_shape' not in self.attention_options:
+                    attention_shape = in_shape
+                else:
+                    attention_shape = self.attention_options['shape']
+            else:
+                attention_shape = None
 
             aggregator_layer.build(in_shape, aggregator_shape, attention_shape=attention_shape)
             self.aggregator_layers.append(aggregator_layer)
@@ -214,7 +224,6 @@ class GraphSAGE(tf.keras.models.Model):
         else:
             return {'total_loss': loss, 'loss': loss}
 
-
 def generate_data_loader(dataset, num_parallel_calls=1, batch_size=1):
     """Create data loader to be fed to model"""
 
@@ -226,16 +235,16 @@ def generate_data_loader(dataset, num_parallel_calls=1, batch_size=1):
 
     return data_loader
 
-
 train = GraphDataset('datasets/data_ppi/train_ppi.pickle')
 data_loader_train = generate_data_loader(train, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
 
 valid = GraphDataset('datasets/data_ppi/val_ppi.pickle')
 data_loader_valid = generate_data_loader(valid, num_parallel_calls=num_parallel_calls, batch_size=batch_size)
 
-model = GraphSAGE(train.nfeats, train.nlabels, activation, depth, nrof_neigh_per_batch, aggregator_options)
-model.build()
+model = GraphSAGE(train.nfeats, train.nlabels, activation, depth, nrof_neigh_per_batch, \
+    aggregator_options, attention_options=attention_options)
 
+model.build()
 model.summary()
 
 # set optimizer
@@ -251,7 +260,6 @@ for epoch in range(total_epochs):
             results = model(*data_batch, training=True)
 
         print(''.join(['%s: %f\t' % (key, value) for key, value in results.items()]))
-
         grads = tape.gradient(results['total_loss'], model.trainable_weights)
         optimizer.apply_gradients(zip(grads, model.trainable_weights))
 
