@@ -20,14 +20,12 @@ num_parallel_calls = 4
 batch_size = 2
 
 # model options
-depth = 2
+depth = 5
 activation = 'sigmoid'
 nrof_neigh_per_batch = 25
 
 # aggregator options
-#aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'mean', 'activation': 'leaky_relu'}
-#aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'pooling', 'activation': 'leaky_relu'}
-aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'attention', 'attention_shape': 50, 'activation': 'leaky_relu', 'attention_activation': 'sigmoid'}
+aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'mean', 'activation': 'leaky_relu'}
 
 if 'shape' not in aggregator_options:
     sys.exit("Aggregation shape is mandatory in aggregator_options!")

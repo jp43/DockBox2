@@ -5,7 +5,6 @@ supported_types = ['pooling', 'mean', 'attention']
 
 default_aggregator_options = {'use_concat': True, 'attention_shape': None, 'activation': 'leaky_relu', 'attention_activation': 'sigmoid'}
 
-
 class Aggregator(tf.keras.layers.Layer):
 
     def __init__(self, type, activation, use_concat, attention_activation='sigmoid'):
@@ -19,7 +18,6 @@ class Aggregator(tf.keras.layers.Layer):
 
         if self.atype == 'attention':
             self.attention_activation = getattr(tf.nn, attention_activation)
-
 
     def build(self, input_shape, output_shape, attention_shape=None):
 
@@ -49,15 +47,12 @@ class Aggregator(tf.keras.layers.Layer):
     def call(self, self_feats, neigh_feats, nneigh, training=True):
 
         if self.atype == 'pooling':
-
             aggregated_feats = tf.reduce_max(neigh_feats, axis=1)
 
         elif self.atype == 'mean':
-
             aggregated_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
 
         elif self.atype == 'attention':
-
             self_feats_attention = self.attention_layer1(self_feats)
             self_feats_attention = self.attention_bn(self_feats_attention, training=training)
 
@@ -81,7 +76,6 @@ class Aggregator(tf.keras.layers.Layer):
             self_feats = tf.concat([self_feats, neigh_feats], axis=1)
         else:
             self_feats = tf.add_n([self_feats, neigh_feats])
-
 
         self_feats = self.bn(self_feats, training=training)
         self_feats = self.activation(self_feats)
