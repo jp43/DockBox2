@@ -25,10 +25,16 @@ activation = 'sigmoid'
 nrof_neigh_per_batch = 25
 
 # aggregator options
-aggregator_options = {'aggregator_shape': 50,
-'use_concat': True,
-'aggregator_type': 'PoolAggregator',
-'aggregator_type_options': {'activation': 'leaky_relu', 'pool_op': 'reduce_max'}}
+#aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'mean', 'activation': 'leaky_relu'}
+#aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'pooling', 'activation': 'leaky_relu'}
+aggregator_options = {'shape': 50, 'use_concat': True, 'type': 'attention', 'attention_shape': 50, 'activation': 'leaky_relu', 'attention_activation': 'sigmoid'}
+
+if 'shape' not in aggregator_options:
+    sys.exit("Aggregation shape is mandatory in aggregator_options!")
+
+for option in default_aggregator_options:
+    if option not in aggregator_options:
+        aggregator_options[option] = default_aggregator_options[option]
 
 # optimizer options
 optimizer_type = 'Adam'
@@ -82,12 +88,12 @@ class GraphDataset(object):
     
         return np.asarray(feats, np.float32), graph_size, \
                np.asarray(neigh_indices, dtype=np.int32), np.asarray(adj_mask, dtype=np.float32), \
-               np.asarray(nneigh, dtype=np.int32), labels
+               np.asarray(nneigh, dtype=np.float32), labels
     
     def sample(self, graph_id, depth, nrof_neigh_per_batch):
 
         return tf.py_function(self.__sample, [graph_id, depth, nrof_neigh_per_batch], [tf.float32, tf.int32,
-                                   tf.int32, tf.float32, tf.int32, tf.int32])
+                                   tf.int32, tf.float32, tf.float32, tf.int32])
 
 class GraphSAGE(tf.keras.models.Model):
 
@@ -105,7 +111,6 @@ class GraphSAGE(tf.keras.models.Model):
         self.nrof_neigh_per_batch = nrof_neigh_per_batch
 
         self.aggregator_options = aggregator_options
-        self.aggregator_options['aggregator_type_options']['use_concat'] = self.aggregator_options['use_concat']
 
         self.loss_function = tf.keras.losses.BinaryCrossentropy()
 
@@ -116,23 +121,33 @@ class GraphSAGE(tf.keras.models.Model):
         self.f1_score = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
 
     def build(self):
-        sys._getframe(1).f_locals.update(self.aggregator_options)
 
-        self.output_layer = tf.keras.layers.Dense(self.out_shape, input_shape=((use_concat+1)*aggregator_shape,), name='output_layer')
-        self.output_layer.build(((use_concat+1)*aggregator_shape,))
+        aggregator_type = self.aggregator_options['type']
+        aggregator_shape = self.aggregator_options['shape']
+
+        aggregator_activation = self.aggregator_options['activation']
+        use_concat = self.aggregator_options['use_concat']
+
+        attention_shape = self.aggregator_options['attention_shape']
+        attention_activation = self.aggregator_options['attention_activation']
 
         self.aggregator_layers = []
         for idx in range(self.depth):
-            # TODO: possibility to create different classes of aggregators
-            aggregator = PoolAggregator(**aggregator_type_options)
-        
+            aggregator_layer = Aggregator(aggregator_type, aggregator_activation, use_concat, attention_activation=attention_activation)
+
             if idx == 0:
                 in_shape = self.in_shape
             else:
                 in_shape = (use_concat+1)*aggregator_shape
 
-            aggregator.build(in_shape, aggregator_shape)
-            self.aggregator_layers.append(aggregator)
+            if aggregator_type == 'attention' and attention_shape is None:
+                attention_shape = in_shape
+
+            aggregator_layer.build(in_shape, aggregator_shape, attention_shape=attention_shape)
+            self.aggregator_layers.append(aggregator_layer)
+
+        self.output_layer = tf.keras.layers.Dense(self.out_shape, input_shape=((use_concat+1)*aggregator_shape,), name='output_layer')
+        self.output_layer.build(((use_concat+1)*aggregator_shape,))
 
         super(GraphSAGE, self).build(())
 
@@ -161,7 +176,11 @@ class GraphSAGE(tf.keras.models.Model):
                 else:
                     neigh_feats = tf.concat([neigh_feats, graph_neigh_feats], axis=0)
 
-            self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, training=training)
+            nneigh_per_graph = []
+            for jdx, nn in enumerate(nneigh[:, idx, :]):
+                nneigh_per_graph.extend(nn[:graph_size[jdx]])
+
+            self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, nneigh_per_graph, training=training)
         self_feats = tf.math.l2_normalize(self_feats, axis=1)
 
         embedded_feats = self.output_layer(self_feats)
