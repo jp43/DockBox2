@@ -4,7 +4,7 @@ import tensorflow as tf
 supported_types = ['pooling', 'mean', 'attention']
 
 default_aggregator_options = {'use_concat': True, 'activation': 'leaky_relu'}
-default_attention_options = {'activation': 'sigmoid'}
+default_attention_options = {'activation': 'leaky_relu'}
 
 class Aggregator(tf.keras.layers.Layer):
 
@@ -18,7 +18,8 @@ class Aggregator(tf.keras.layers.Layer):
         self.activation = getattr(tf.nn, activation)
 
         if self.type == 'attention':
-            self.attention_layer = AttentionLayer(attention_options['activation'])
+            attention_activation = attention_options['activation']
+            self.attention_layer = AttentionLayer(attention_activation)
 
     def build(self, input_shape, output_shape, attention_shape=None):
 
@@ -82,7 +83,6 @@ class AttentionLayer(tf.keras.layers.Layer):
 
         super(AttentionLayer, self).build(())
 
-
     def call(self, self_feats, neigh_feats, training=True):
 
         self_feats_shared = self.shared_layer(self_feats)
@@ -94,8 +94,9 @@ class AttentionLayer(tf.keras.layers.Layer):
 
         concat = tf.concat([tf.stack([self_feats_shared]*tf.shape(neigh_feats_shared)[1].numpy(), axis=1), neigh_feats_shared], axis=2)
         coefficients = self.output_layer(concat)
+        coefficients = self.activation(coefficients) 
 
         coefficients = tf.nn.softmax(tf.squeeze(coefficients, axis=2))
         coefficients = tf.expand_dims(coefficients, axis=2)
 
-        return self.activation(tf.reduce_sum(tf.multiply(coefficients, neigh_feats), axis=1))
+        return tf.reduce_sum(tf.multiply(coefficients, neigh_feats), axis=1)
