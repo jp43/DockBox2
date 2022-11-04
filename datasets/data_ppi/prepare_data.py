@@ -45,7 +45,7 @@ subgraphs = list(nx.connected_components(G))
 
 sets = {'train': {}, 'val': {}, 'test': {}}
 for key in sets:
-    for att in ['Graph_nodes', 'Graph_feats', 'Graph_adj_list', 'Graph_labels',  'Graph_degree']:
+    for att in ['nodes', 'feats', 'adj_list', 'labels',  'degree']:
         sets[key][att] = []
 
 for kdx, sg in enumerate(subgraphs):
@@ -75,23 +75,19 @@ for kdx, sg in enumerate(subgraphs):
             setname = 'test'
         else:
             continue
-        sets[setname]['Graph_nodes'].append(sg)
-        sets[setname]['Graph_feats'].append(np.array([G.nodes[idx]['feature'] for idx in sg]))
+        sets[setname]['nodes'].append(sg)
+        sets[setname]['feats'].append(np.array([G.nodes[idx]['feature'] for idx in sg]))
 
         adj = compute_adj_from_subgraph(G, sg)
         assert((adj == adj.transpose()).all())
-        sets[setname]['Graph_adj_list'].append(adj)
-        sets[setname]['Graph_labels'].append(np.array([G.nodes[idx]['label'] for idx in sg]))
-        sets[setname]['Graph_degree'].append([len(list(G.neighbors(idx))) for idx in sg])
+        sets[setname]['adj_list'].append(adj)
+        sets[setname]['labels'].append(np.array([G.nodes[idx]['label'] for idx in sg]))
+        sets[setname]['degree'].append([len(list(G.neighbors(idx))) for idx in sg])
     else:
         continue
 
 for setname in sets:
-    sets[setname]['G'] = G
-    sets[setname]['feats'] = feats
-    sets[setname]['id_map'] = id_map
-    sets[setname]['class_map'] = class_map
-    sets[setname]['max_nrof_nodes'] = max([len(sg) for sg in sets[setname]['Graph_nodes']])
+    sets[setname]['max_nrof_nodes'] = max([len(sg) for sg in sets[setname]['nodes']])
  
     with open(setname+'_ppi.pickle', "wb") as ff:
         pickle.dump(sets[setname], ff)

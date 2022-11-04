@@ -39,6 +39,7 @@ class Aggregator(tf.keras.layers.Layer):
 
     def call(self, self_feats, neigh_feats, nneigh, training=True):
 
+        # aggregation
         if self.type == 'pooling':
             aggregated_feats = tf.reduce_max(neigh_feats, axis=1)
 
@@ -46,17 +47,19 @@ class Aggregator(tf.keras.layers.Layer):
             aggregated_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
 
         elif self.type == 'attention':
-            aggregated_feats = self.attention_layer(self_feats, neigh_feats, training=training)
+            attention_coefficients = self.attention_layer(self_feats, neigh_feats, training=training)
+            aggregated_feats = tf.reduce_sum(tf.multiply(attention_coefficients, neigh_feats), axis=1)
         else:
             sys.exit("Unrecognized type aggregator %s"%self.type)
 
+        # update self features
         self_feats = self.self_layer(self_feats)
-        neigh_feats = self.neigh_layer(aggregated_feats)
+        aggregated_feats = self.neigh_layer(aggregated_feats)
 
         if self.use_concat:
-            self_feats = tf.concat([self_feats, neigh_feats], axis=1)
+            self_feats = tf.concat([self_feats, aggregated_feats], axis=1)
         else:
-            self_feats = tf.add_n([self_feats, neigh_feats])
+            self_feats = tf.add_n([self_feats, aggregated_feats])
 
         self_feats = self.bn(self_feats, training=training)
         self_feats = self.activation(self_feats)
@@ -99,4 +102,4 @@ class AttentionLayer(tf.keras.layers.Layer):
         coefficients = tf.nn.softmax(tf.squeeze(coefficients, axis=2))
         coefficients = tf.expand_dims(coefficients, axis=2)
 
-        return tf.reduce_sum(tf.multiply(coefficients, neigh_feats), axis=1)
+        return coefficients

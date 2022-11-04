@@ -52,18 +52,18 @@ class GraphDataset(object):
         with open(filename, "rb") as ff:
            data = pickle.load(ff)
  
-        self.graph_feats = data['Graph_feats']
-        self.graph_adj_list = data['Graph_adj_list']
-        self.graph_labels = data['Graph_labels']
+        self.graph_feats = data['feats']
+        self.graph_adj_list = data['adj_list']
+        self.graph_labels = data['labels']
         self.max_nrof_nodes = data['max_nrof_nodes']
 
-        self.nfeats = data['Graph_feats'][0].shape[1]
+        self.nfeats = data['feats'][0].shape[1]
 
-        self.nlabels = data['Graph_labels'][0].shape[1]
-        self.ngraphs = len(data['Graph_nodes'])
+        self.nlabels = data['labels'][0].shape[1]
+        self.ngraphs = len(data['nodes'])
 
         self.graph_size = []
-        for kdx, graph in enumerate(data['Graph_nodes']):
+        for kdx, graph in enumerate(data['nodes']):
             self.graph_size.append(len(graph))
 
     def __sample(self, graph_id, depth, nrof_neigh_per_batch):
