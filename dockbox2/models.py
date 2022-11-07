@@ -6,7 +6,7 @@ import tensorflow_addons as tfa
 from dockbox2.aggregators import *
 
 from dockbox2 import loss as db2loss
-from dockbox2 import metrics as db2metrics
+from dockbox2 import metrics as mt
 
 class GraphSAGE(tf.keras.models.Model):
 
@@ -35,13 +35,13 @@ class GraphSAGE(tf.keras.models.Model):
         loss_function = getattr(loss_module, loss_type)
         self.loss_function = loss_function(**loss_options)
 
-        # set up performance metrics
+        # performance metrics
         if self.out_shape == 1:
-            self.precision_0 = db2metrics.ClassificationMetric(0, metric='precision')
-            self.precision_1 = db2metrics.ClassificationMetric(1, metric='precision')
+            self.precision_0 = mt.ClassificationMetric(0, metric='precision')
+            self.precision_1 = mt.ClassificationMetric(1, metric='precision')
 
-            self.recall_0 = db2metrics.ClassificationMetric(0, metric='recall')
-            self.recall_1 = db2metrics.ClassificationMetric(1, metric='recall')
+            self.recall_0 = mt.ClassificationMetric(0, metric='recall')
+            self.recall_1 = mt.ClassificationMetric(1, metric='recall')
         else:
             self.precision = tf.keras.metrics.Precision()
             self.recall = tf.keras.metrics.Recall()
