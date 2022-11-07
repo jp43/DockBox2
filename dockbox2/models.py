@@ -1,18 +1,12 @@
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-import sys
-import time
-import argparse
-import pickle
 import numpy as np
 
 import tensorflow as tf
 import tensorflow_addons as tfa
 
-from dockbox2 import metrics as dbmetrics
 from dockbox2.aggregators import *
+
 from dockbox2 import loss as db2loss
+from dockbox2 import metrics as db2metrics
 
 class GraphSAGE(tf.keras.models.Model):
 
@@ -32,6 +26,7 @@ class GraphSAGE(tf.keras.models.Model):
         self.aggregator_options = aggregator_options
         self.attention_options = attention_options
 
+        # set up loss function
         loss_type = loss_options.pop('type')
         if hasattr(db2loss, loss_type):
             loss_module = db2loss
@@ -40,9 +35,13 @@ class GraphSAGE(tf.keras.models.Model):
         loss_function = getattr(loss_module, loss_type)
         self.loss_function = loss_function(**loss_options)
 
-        if out_shape == 1:
-            self.precision = [dbmetrics.LabeledPrecision(idx) for idx in [0, 1]]
-            self.recall = [dbmetrics.LabeledRecall(idx) for idx in [0, 1]]
+        # set up performance metrics
+        if self.out_shape == 1:
+            self.precision_0 = db2metrics.ClassificationMetric(0, metric='precision')
+            self.precision_1 = db2metrics.ClassificationMetric(1, metric='precision')
+
+            self.recall_0 = db2metrics.ClassificationMetric(0, metric='recall')
+            self.recall_1 = db2metrics.ClassificationMetric(1, metric='recall')
         else:
             self.precision = tf.keras.metrics.Precision()
             self.recall = tf.keras.metrics.Recall()
@@ -135,11 +134,11 @@ class GraphSAGE(tf.keras.models.Model):
     def call_metrics(self, labels, predicted_labels):
 
         if self.out_shape == 1:
-            precision_0 = self.precision[0](labels, predicted_labels)
-            precision_1 = self.precision[1](labels, predicted_labels)
+            precision_0 = self.precision_0(labels, predicted_labels)
+            precision_1 = self.precision_1(labels, predicted_labels)
 
-            recall_0 = self.recall[0](labels, predicted_labels)
-            recall_1 = self.recall[1](labels, predicted_labels)
+            recall_0 = self.recall_0(labels, predicted_labels)
+            recall_1 = self.recall_1(labels, predicted_labels)
 
             f1_score = self.f1_score(labels, predicted_labels)
             return {'precis_0': precision_0, 'precis_1': precision_1, 'recall_0': recall_0, 'recall_1': recall_1, 'f1': f1_score}
