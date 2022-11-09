@@ -10,7 +10,7 @@ from dockbox2 import metrics as mt
 
 class GraphSAGE(tf.keras.models.Model):
 
-    def __init__(self, in_shape, out_shape, activation, depth, nrof_neigh, loss_options, aggregator_options, attention_options=None):
+    def __init__(self, in_shape, out_shape, activation, depth, nrof_neigh, loss_options, aggregator_options, is_edge_feature=False, attention_options=None):
         super(GraphSAGE, self).__init__()
 
         self.in_shape = in_shape
@@ -24,6 +24,8 @@ class GraphSAGE(tf.keras.models.Model):
         self.nrof_neigh = nrof_neigh
 
         self.aggregator_options = aggregator_options
+
+        self.is_edge_feature = is_edge_feature
         self.attention_options = attention_options
 
         # set up loss function
@@ -60,7 +62,8 @@ class GraphSAGE(tf.keras.models.Model):
 
         self.aggregator_layers = []
         for idx in range(self.depth):
-            aggregator_layer = Aggregator(aggregator_type, aggregator_activation, use_concat, attention_options=self.attention_options)
+            aggregator_layer = Aggregator(aggregator_type, aggregator_activation, use_concat, is_edge_feature=self.is_edge_feature, \
+attention_options=self.attention_options)
 
             if idx == 0:
                 in_shape = self.in_shape
@@ -83,9 +86,9 @@ class GraphSAGE(tf.keras.models.Model):
 
         super(GraphSAGE, self).build(())
 
-    def call(self, feats, graph_size, neigh_indices, adj_mask, nneigh, labels, training=True):
+    def call(self, feats, graph_size, neigh_indices, adj_mask, edge_feats_mask, nneigh, labels, training=True):
 
-        nrof_graphs = len(graph_size) # number of graphs in the batch
+        nrof_graphs = len(graph_size) # number of graphs in the minibatch
         graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
 
         # initialize self_feats
@@ -94,26 +97,30 @@ class GraphSAGE(tf.keras.models.Model):
              self_feats = tf.concat([self_feats, feats[kdx][:graph_size[kdx]]], axis=0)
 
         for idx in range(self.depth):
-
             # construct neigh_feats from self_feats
+
             for kdx in range(nrof_graphs):
                 graph_self_feats = tf.gather(self_feats, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
                 graph_neigh_feats = tf.gather(graph_self_feats, neigh_indices[kdx][idx][:graph_size[kdx],:])
 
                 # needed to exclude zero-padded nodes
                 graph_adj_mask = adj_mask[kdx][idx][:graph_size[kdx],:]
-                graph_neigh_feats = tf.multiply(tf.expand_dims(graph_adj_mask, axis=2), graph_neigh_feats)
+                graph_edge_feats = edge_feats_mask[kdx][idx][:graph_size[kdx],:]
 
+                graph_neigh_feats = tf.multiply(tf.expand_dims(graph_adj_mask, axis=2), graph_neigh_feats)
+                
                 if kdx == 0:
                     neigh_feats = graph_neigh_feats
+                    neigh_edge_feats = graph_edge_feats
                 else:
                     neigh_feats = tf.concat([neigh_feats, graph_neigh_feats], axis=0)
+                    neigh_edge_feats = tf.concat([neigh_edge_feats, graph_edge_feats], axis=0)
 
             nneigh_per_graph = []
             for jdx, nn in enumerate(nneigh[:, idx, :]):
                 nneigh_per_graph.extend(nn[:graph_size[jdx]])
 
-            self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, nneigh_per_graph, training=training)
+            self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, neigh_edge_feats, nneigh_per_graph, training=training)
         self_feats = tf.math.l2_normalize(self_feats, axis=1)
 
         embedded_feats = self.output_layer(self_feats)

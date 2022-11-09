@@ -8,7 +8,7 @@ default_attention_options = {'activation': 'leaky_relu'}
 
 class Aggregator(tf.keras.layers.Layer):
 
-    def __init__(self, type, activation, use_concat, attention_options=None):
+    def __init__(self, type, activation, use_concat, is_edge_feature=False, attention_options=None):
 
         super(Aggregator, self).__init__()
 
@@ -17,11 +17,18 @@ class Aggregator(tf.keras.layers.Layer):
 
         self.activation = getattr(tf.nn, activation)
 
+        self.is_edge_feature = is_edge_feature
+        if self.is_edge_feature:
+            self.edge_activation = getattr(tf.nn, activation)
+
         if self.type == 'attention':
             attention_activation = attention_options['activation']
             self.attention_layer = AttentionLayer(attention_activation)
 
     def build(self, input_shape, output_shape, attention_shape=None):
+
+        if self.is_edge_feature:
+            self.edge_layer = tf.keras.layers.Dense(input_shape, input_shape=(input_shape+1,), name='edge_layer')
 
         if self.type == 'attention':
             self.attention_layer.build(input_shape, attention_shape)
@@ -37,17 +44,24 @@ class Aggregator(tf.keras.layers.Layer):
 
         super(Aggregator, self).build(())
 
-    def call(self, self_feats, neigh_feats, nneigh, training=True):
+    def call(self, self_feats, neigh_feats, neigh_edge_feats, nneigh, training=True):
+
+        if self.is_edge_feature:
+            concat = tf.concat([neigh_feats, tf.expand_dims(neigh_edge_feats, axis=2)], axis=2)
+            extracted_neigh_feats = self.edge_layer(concat)
+            extracted_neigh_feats = self.edge_activation(extracted_neigh_feats)
+        else:
+            extracted_neigh_feats = neigh_feats
 
         if self.type == 'pooling':
-            aggregated_feats = tf.reduce_max(neigh_feats, axis=1)
+            aggregated_feats = tf.reduce_max(extracted_neigh_feats, axis=1)
 
         elif self.type == 'mean':
-            aggregated_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
+            aggregated_feats = tf.divide(tf.reduce_sum(extracted_neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
 
         elif self.type == 'attention':
-            attention_weights = self.attention_layer(self_feats, neigh_feats, training=training)
-            aggregated_feats = tf.reduce_sum(tf.multiply(attention_weights, neigh_feats), axis=1)
+            attention_weights = self.attention_layer(self_feats, extracted_neigh_feats, training=training)
+            aggregated_feats = tf.reduce_sum(tf.multiply(attention_weights, extracted_neigh_feats), axis=1)
         else:
             sys.exit("Unrecognized type aggregator %s"%self.type)
 

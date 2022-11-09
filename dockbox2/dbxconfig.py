@@ -5,7 +5,8 @@ import configparser
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                        'depth': {'default': 2, 'type': int},
                                        'activation': {'default': 'sigmoid'},
-                                       'nrof_neigh': {'default': 25, 'type': int}},
+                                       'nrof_neigh': {'default': 25, 'type': int},
+                                       'edge_feature': {'default': None}},
 
 'MINIBATCH': {'batch_size': {'default': 2, 'type': int},
               'num_parallel_calls': {'default': 1, 'type': int}},
@@ -97,6 +98,7 @@ class ConfigSetup(object):
 
         self.activation = parameters['GENERAL']['activation']
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
+        self.edge_feature = parameters['GENERAL']['edge_feature']
 
         self.minibatch = parameters['MINIBATCH']
         self.loss = parameters['LOSS']
