@@ -28,7 +28,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                'activation': {'default': 'leaky_relu'}}
 }
 
-default_options['LOSSB'] = default_options['LOSSN']
+default_options['LOSSG'] = default_options['LOSSN']
 
 class ConfigSetup(object):
 
@@ -107,7 +107,7 @@ class ConfigSetup(object):
 
         self.minibatch = parameters['MINIBATCH']
         self.loss = {'loss_n': parameters['LOSSN'], 
-                     'loss_b': parameters['LOSSB'],
+                     'loss_g': parameters['LOSSG'],
                      'loss_reg': parameters['LOSSR']}
 
         self.aggregator = parameters['AGGREGATOR']

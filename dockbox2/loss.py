@@ -32,3 +32,4 @@ class BinaryFocalCrossentropy(tf.keras.losses.Loss):
 
         loss = -alpha_t * tf.math.pow(1 - p_t, self.gamma) * tf.math.log(p_t)
         return  self.weight*tf.reduce_mean(loss)
+

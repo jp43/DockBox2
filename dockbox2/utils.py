@@ -1,8 +1,8 @@
 import tensorflow as tf
 
-def append_batch_results(index, values, batch_values):
+def append_batch_results(values, batch_values, first=True):
 
-    if index == 0:
+    if first:
         return batch_values
     else:
         return tf.concat([values, batch_values], axis=0)

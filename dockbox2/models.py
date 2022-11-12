@@ -28,13 +28,16 @@ class GraphSAGE(tf.keras.models.Model):
         self.is_edge_feature = is_edge_feature
         self.attention_options = attention_options
 
-        # set up loss functions
+        # node-level loss functions
         self.loss_n_function = self.build_loss(loss_options['loss_n'])
-        self.loss_b_function = self.build_loss(loss_options['loss_b'])
         self.loss_reg_w = loss_options['loss_reg']['weight']
+
+        # graph-level loss function
+        self.loss_g_function = self.build_loss(loss_options['loss_g'])
 
         # performance metrics
         if self.out_shape == 1:
+            # precision
             self.precis_0 = db2mt.ClassificationMetric(0, metric='precision')
             self.precis_1 = db2mt.ClassificationMetric(1, metric='precision')
 
@@ -139,35 +142,39 @@ attention_options=self.attention_options)
         else:
             batch_labels = np.expand_dims(labels, 1)
 
-        # extract best node of each graph
-        best_node_predicted_labels = np.zeros(nrof_graphs, dtype=np.float32)
-        best_node_labels = np.zeros(nrof_graphs, dtype=np.int32)
+        batch_predicted_graph_labels = np.zeros(nrof_graphs, dtype=np.float32)
+
+        batch_graph_labels = np.zeros(nrof_graphs, dtype=np.int32)
+        batch_best_node_labels = np.zeros(nrof_graphs, dtype=np.int32) # labels of best nodes
 
         for kdx in range(nrof_graphs):
-            graph_predicted_labels = tf.gather(batch_predicted_labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
-            best_node_idx = tf.math.argmax(graph_predicted_labels)
+            graph_batch_predicted_labels = tf.gather(batch_predicted_labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
 
-            best_node_predicted_labels[kdx] = tf.gather(graph_predicted_labels, best_node_idx)
-            best_node_labels[kdx] = tf.gather(labels[kdx][:graph_size[kdx],:], best_node_idx)
+            best_node_idx = tf.math.argmax(graph_batch_predicted_labels)
+            batch_predicted_graph_labels[kdx] = tf.gather(graph_batch_predicted_labels, best_node_idx)
+            graph_labels = labels[kdx][:graph_size[kdx],:]
 
-        best_node_predicted_labels = tf.convert_to_tensor(best_node_predicted_labels[:,np.newaxis])
-        best_node_labels = tf.convert_to_tensor(best_node_labels[:,np.newaxis])
+            batch_best_node_labels[kdx] = tf.gather(graph_labels, best_node_idx)
+            batch_graph_labels[kdx] = tf.reduce_any(tf.equal(graph_labels, 1))
 
-        loss = self.call_loss(batch_labels, batch_predicted_labels, best_node_labels, best_node_predicted_labels, regularization=True)
-        self.call_metrics(best_node_labels, best_node_predicted_labels)
+        batch_predicted_graph_labels = tf.convert_to_tensor(batch_predicted_graph_labels[:,np.newaxis])
+        batch_graph_labels = tf.convert_to_tensor(batch_graph_labels[:,np.newaxis])
 
-        return batch_labels, batch_predicted_labels, best_node_labels, best_node_predicted_labels, loss
+        batch_best_node_labels = tf.convert_to_tensor(batch_best_node_labels[:,np.newaxis])
 
-    def call_loss(self, labels, predicted_labels, best_node_labels, best_node_predicted_labels, regularization=True):
+        loss = self.call_loss(batch_labels, batch_predicted_labels, batch_graph_labels, batch_predicted_graph_labels, regularization=True)
+        return batch_labels, batch_predicted_labels, batch_graph_labels, batch_predicted_graph_labels, batch_best_node_labels, loss
+
+    def call_loss(self, labels, predicted_labels, graph_labels, predicted_graph_labels, regularization=True):
 
         loss_n = self.loss_n_function(labels, predicted_labels)
-        loss_b = self.loss_b_function(best_node_labels, best_node_predicted_labels)
+        loss_g = self.loss_g_function(graph_labels, predicted_graph_labels)
 
         if regularization:
-            reg_loss = 0.0005 * self.loss_reg_w * tf.add_n([tf.nn.l2_loss(w) for w in self.trainable_variables])
-            return {'total_loss': loss_n + loss_b + reg_loss, 'loss_n': loss_n, 'loss_b': loss_b, 'reg_loss': reg_loss}
+            reg_loss = self.loss_reg_w * 0.0005 * tf.add_n([tf.nn.l2_loss(w) for w in self.trainable_variables])
+            return {'total_loss': loss_n + loss_g + reg_loss, 'loss_n': loss_n, 'loss_g': loss_g, 'reg_loss': reg_loss}
         else:
-            return {'total_loss': loss_n + loss_b, 'loss_n': loss_n, 'loss_b': loss_b}
+            return {'total_loss': loss_n + loss_g, 'loss_n': loss_n, 'loss_g': loss_g}
 
     def call_metrics(self, labels, predicted_labels):
 
@@ -179,7 +186,7 @@ attention_options=self.attention_options)
             recall_1 = self.recall_1(labels, predicted_labels)
 
             f1_score = self.f1_score(labels, predicted_labels)
-            return {'precis_0': precis_0, 'precis_1': precis_1, 'recall_0': recall_0, 'recall_1': recall_1, 'f1': f1_score}
+            return {'precis_0': precis_0, 'precis_1': precis_1, 'recall_0': recall_0, 'recall_1': recall_1}
         else:
             precision = self.precision(labels, predicted_labels)
             recall = self.recall(labels, predicted_labels)
@@ -187,3 +194,13 @@ attention_options=self.attention_options)
             f1_score = self.f1_score(labels, predicted_labels)
             return {'precision': precision, 'recall': recall, 'f1': f1_score}
 
+    def success_rate(self, graph_labels, pred_graph_labels, best_node_labels, threshold=0.5):
+
+        pred_graph_labels_i = tf.cast(tf.greater_equal(pred_graph_labels[:, 0], threshold), tf.int32)
+        pred_graph_labels_i = tf.expand_dims(pred_graph_labels_i, axis=1)
+
+        correct_preds = tf.logical_and(tf.equal(graph_labels, pred_graph_labels_i), \
+                       tf.logical_or(tf.equal(graph_labels, 0), tf.logical_and(tf.equal(graph_labels, 1), tf.equal(pred_graph_labels_i, best_node_labels))))
+
+        nrof_correct_preds = tf.get_static_value(tf.math.count_nonzero(correct_preds))
+        return nrof_correct_preds*100./len(graph_labels)
