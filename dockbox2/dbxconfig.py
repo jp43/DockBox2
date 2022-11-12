@@ -11,10 +11,13 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'MINIBATCH': {'batch_size': {'default': 2, 'type': int},
               'num_parallel_calls': {'default': 1, 'type': int}},
 
-'LOSS': {'type': {'default': 'BinaryFocalCrossentropy'},
+'LOSSN': {'type': {'default': 'BinaryFocalCrossentropy'},
          'apply_class_balancing': {'default': False, 'type': bool, 'with_option': ('type', 'BinaryFocalCrossentropy')},
          'alpha': {'default': 0.25, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
-         'gamma': {'default': 2.0, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')}},
+         'gamma': {'default': 2.0, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
+         'weight': {'default': 1.0, 'type': float}},
+
+'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': int},
               'type': {'default': 'pooling'},
@@ -24,6 +27,8 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'ATTENTION': { 'shape': {'default': None, 'type': int},
                'activation': {'default': 'leaky_relu'}}
 }
+
+default_options['LOSSB'] = default_options['LOSSN']
 
 class ConfigSetup(object):
 
@@ -101,7 +106,9 @@ class ConfigSetup(object):
         self.edge_feature = parameters['GENERAL']['edge_feature']
 
         self.minibatch = parameters['MINIBATCH']
-        self.loss = parameters['LOSS']
+        self.loss = {'loss_n': parameters['LOSSN'], 
+                     'loss_b': parameters['LOSSB'],
+                     'loss_reg': parameters['LOSSR']}
 
         self.aggregator = parameters['AGGREGATOR']
         self.attention = parameters['ATTENTION']

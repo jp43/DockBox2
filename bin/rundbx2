@@ -9,9 +9,10 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from dockbox2.datasets import *
 from dockbox2 import dbxconfig
 from dockbox2 import models
+from dockbox2.utils import *
 
 # command-line arguments and options
-parser = argparse.ArgumentParser(description="Train DockBox2 model")
+parser = argparse.ArgumentParser(description="Train GNN model")
 
 parser.add_argument('-t',
     type=str,
@@ -61,43 +62,46 @@ model.summary()
 optimizer_class = getattr(tf.keras.optimizers, optimizer_type)
 optimizer = optimizer_class(learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(**lr_schedule))
 
+labels = None
+pred_labels = None
+
+best_node_labels = None
+best_node_pred_labels = None
+
 for epoch in range(config.epochs):
     print("Epoch %i"%epoch)
 
     for idx, data_batch in enumerate(data_loader_train):
 
         with tf.GradientTape() as tape:
-            batch_labels, batch_pred_labels, loss = model(*data_batch, training=True)
+            batch_labels, batch_pred_labels, batch_best_node_labels, batch_best_node_pred_labels, loss = model(*data_batch, training=True)
 
         grads = tape.gradient(loss['total_loss'], model.trainable_weights)
         optimizer.apply_gradients(zip(grads, model.trainable_weights))
 
-        if idx == 0:
-            labels = batch_labels
-            pred_labels = batch_pred_labels
-        else:
-            labels = tf.concat([labels, batch_labels], axis=0)
-            pred_labels = tf.concat([pred_labels, batch_pred_labels], axis=0)
+        labels = append_batch_results(idx, labels, batch_labels)
+        pred_labels = append_batch_results(idx, pred_labels, batch_pred_labels)
 
-    loss_values = model.call_loss(labels, pred_labels)
-    metrics_values = model.call_metrics(labels, pred_labels)
+        best_node_labels = append_batch_results(idx, best_node_labels, batch_best_node_labels)
+        best_node_pred_labels = append_batch_results(idx, best_node_pred_labels, batch_best_node_pred_labels)
 
-    print('Train: '+ ''.join(['%s: %.5f    ' % (key, value) for key, value in {**metrics_values, **loss_values}.items()]))
+    loss_values = model.call_loss(labels, pred_labels, best_node_labels, best_node_pred_labels)
+    metrics_values = model.call_metrics(best_node_labels, best_node_pred_labels)
+    print('Train:  '+ ''.join(['%s: %.4f   ' % (key, value) for key, value in {**metrics_values, **loss_values}.items()]))
 
     for idx, data_batch in enumerate(data_loader_valid):
 
         with tf.GradientTape() as tape:
-            labels, pred_labels, loss = model(*data_batch, training=False)
+            batch_labels, batch_pred_labels, batch_best_node_labels, batch_best_node_pred_labels, loss = model(*data_batch, training=False)
 
-        if idx == 0:
-            labels = batch_labels
-            pred_labels = batch_pred_labels
-        else:
-            labels = tf.concat([labels, batch_labels], axis=0)
-            pred_labels = tf.concat([pred_labels, batch_pred_labels], axis=0)
+        labels = append_batch_results(idx, labels, batch_labels)
+        pred_labels = append_batch_results(idx, pred_labels, batch_pred_labels)
 
-    loss_values = model.call_loss(labels, pred_labels)
-    metrics_values = model.call_metrics(labels, pred_labels)
+        best_node_labels = append_batch_results(idx, best_node_labels, batch_best_node_labels)
+        best_node_pred_labels = append_batch_results(idx, best_node_pred_labels, batch_best_node_pred_labels)
 
-    print('Valid: ' + ''.join(['%s: %.5f    ' % (key, value) for key, value in metrics_values.items()]))
+    loss_values = model.call_loss(labels, pred_labels, best_node_labels, best_node_pred_labels)
+    metrics_values = model.call_metrics(best_node_labels, best_node_pred_labels)
+    print('Valid:  ' + ''.join(['%s: %.4f   ' % (key, value) for key, value in metrics_values.items()]))
+
     time.sleep(1)

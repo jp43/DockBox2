@@ -6,7 +6,7 @@ import tensorflow_addons as tfa
 from dockbox2.aggregators import *
 
 from dockbox2 import loss as db2loss
-from dockbox2 import metrics as mt
+from dockbox2 import metrics as db2mt
 
 class GraphSAGE(tf.keras.models.Model):
 
@@ -28,27 +28,34 @@ class GraphSAGE(tf.keras.models.Model):
         self.is_edge_feature = is_edge_feature
         self.attention_options = attention_options
 
-        # set up loss function
-        loss_type = loss_options.pop('type')
-        if hasattr(db2loss, loss_type):
-            loss_module = db2loss
-        else:
-            loss_module = tf.keras.losses
-        loss_function = getattr(loss_module, loss_type)
-        self.loss_function = loss_function(**loss_options)
+        # set up loss functions
+        self.loss_n_function = self.build_loss(loss_options['loss_n'])
+        self.loss_b_function = self.build_loss(loss_options['loss_b'])
+        self.loss_reg_w = loss_options['loss_reg']['weight']
 
         # performance metrics
         if self.out_shape == 1:
-            self.precision_0 = mt.ClassificationMetric(0, metric='precision')
-            self.precision_1 = mt.ClassificationMetric(1, metric='precision')
+            self.precis_0 = db2mt.ClassificationMetric(0, metric='precision')
+            self.precis_1 = db2mt.ClassificationMetric(1, metric='precision')
 
-            self.recall_0 = mt.ClassificationMetric(0, metric='recall')
-            self.recall_1 = mt.ClassificationMetric(1, metric='recall')
+            self.recall_0 = db2mt.ClassificationMetric(0, metric='recall')
+            self.recall_1 = db2mt.ClassificationMetric(1, metric='recall')
         else:
             self.precision = tf.keras.metrics.Precision()
             self.recall = tf.keras.metrics.Recall()
 
         self.f1_score = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
+
+    def build_loss(self, options):
+
+        loss_type = options.pop('type')
+        if hasattr(db2loss, loss_type):
+            loss_module = db2loss
+        else:
+            loss_module = tf.keras.losses
+        loss_function = getattr(loss_module, loss_type)
+
+        return loss_function(**options)
 
     def build(self):
 
@@ -98,7 +105,6 @@ attention_options=self.attention_options)
 
         for idx in range(self.depth):
             # construct neigh_feats from self_feats
-
             for kdx in range(nrof_graphs):
                 graph_self_feats = tf.gather(self_feats, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
                 graph_neigh_feats = tf.gather(graph_self_feats, neigh_indices[kdx][idx][:graph_size[kdx],:])
@@ -133,22 +139,47 @@ attention_options=self.attention_options)
         else:
             batch_labels = np.expand_dims(labels, 1)
 
-        self.call_metrics(batch_labels, batch_predicted_labels)
-        loss = self.call_loss(batch_labels, batch_predicted_labels, regularization=True)
+        # extract best node of each graph
+        best_node_predicted_labels = np.zeros(nrof_graphs, dtype=np.float32)
+        best_node_labels = np.zeros(nrof_graphs, dtype=np.int32)
 
-        return batch_labels, batch_predicted_labels, loss
+        for kdx in range(nrof_graphs):
+            graph_predicted_labels = tf.gather(batch_predicted_labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+            best_node_idx = tf.math.argmax(graph_predicted_labels)
+
+            best_node_predicted_labels[kdx] = tf.gather(graph_predicted_labels, best_node_idx)
+            best_node_labels[kdx] = tf.gather(labels[kdx][:graph_size[kdx],:], best_node_idx)
+
+        best_node_predicted_labels = tf.convert_to_tensor(best_node_predicted_labels[:,np.newaxis])
+        best_node_labels = tf.convert_to_tensor(best_node_labels[:,np.newaxis])
+
+        loss = self.call_loss(batch_labels, batch_predicted_labels, best_node_labels, best_node_predicted_labels, regularization=True)
+        self.call_metrics(best_node_labels, best_node_predicted_labels)
+
+        return batch_labels, batch_predicted_labels, best_node_labels, best_node_predicted_labels, loss
+
+    def call_loss(self, labels, predicted_labels, best_node_labels, best_node_predicted_labels, regularization=True):
+
+        loss_n = self.loss_n_function(labels, predicted_labels)
+        loss_b = self.loss_b_function(best_node_labels, best_node_predicted_labels)
+
+        if regularization:
+            reg_loss = 0.0005 * self.loss_reg_w * tf.add_n([tf.nn.l2_loss(w) for w in self.trainable_variables])
+            return {'total_loss': loss_n + loss_b + reg_loss, 'loss_n': loss_n, 'loss_b': loss_b, 'reg_loss': reg_loss}
+        else:
+            return {'total_loss': loss_n + loss_b, 'loss_n': loss_n, 'loss_b': loss_b}
 
     def call_metrics(self, labels, predicted_labels):
 
         if self.out_shape == 1:
-            precision_0 = self.precision_0(labels, predicted_labels)
-            precision_1 = self.precision_1(labels, predicted_labels)
+            precis_0 = self.precis_0(labels, predicted_labels)
+            precis_1 = self.precis_1(labels, predicted_labels)
 
             recall_0 = self.recall_0(labels, predicted_labels)
             recall_1 = self.recall_1(labels, predicted_labels)
 
             f1_score = self.f1_score(labels, predicted_labels)
-            return {'precis_0': precision_0, 'precis_1': precision_1, 'recall_0': recall_0, 'recall_1': recall_1, 'f1': f1_score}
+            return {'precis_0': precis_0, 'precis_1': precis_1, 'recall_0': recall_0, 'recall_1': recall_1, 'f1': f1_score}
         else:
             precision = self.precision(labels, predicted_labels)
             recall = self.recall(labels, predicted_labels)
@@ -156,12 +187,3 @@ attention_options=self.attention_options)
             f1_score = self.f1_score(labels, predicted_labels)
             return {'precision': precision, 'recall': recall, 'f1': f1_score}
 
-    def call_loss(self, labels, predicted_labels, regularization=True):
-        loss = self.loss_function(labels, predicted_labels)
-
-        if regularization:
-            reg_loss = 0.0005 * tf.add_n([tf.nn.l2_loss(w) for w in self.trainable_variables])
-            total_loss = loss + reg_loss
-            return {'total_loss': loss + reg_loss, 'loss': loss, 'reg_loss': reg_loss}
-        else:
-            return {'total_loss': loss, 'loss': loss}

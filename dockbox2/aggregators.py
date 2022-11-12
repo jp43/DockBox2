@@ -62,6 +62,7 @@ class Aggregator(tf.keras.layers.Layer):
         elif self.type == 'attention':
             attention_weights = self.attention_layer(self_feats, extracted_neigh_feats, training=training)
             aggregated_feats = tf.reduce_sum(tf.multiply(attention_weights, extracted_neigh_feats), axis=1)
+
         else:
             sys.exit("Unrecognized type aggregator %s"%self.type)
 

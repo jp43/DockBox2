@@ -38,8 +38,10 @@ class GraphDataset(object):
             self.graph_feats.append(np.array(feats))
 
             if edge_feature is not None:
-                self.graph_edge_feats.append(nx.to_numpy_array(graph, weight=edge_feature))
-
+                edge_feats = nx.to_numpy_array(graph, weight=edge_feature)
+                #assert ((adj==1) == (edge_feats>.0)).all()
+                self.graph_edge_feats.append(edge_feats)
+                 
             if isinstance(labels[0], int):
                 labels = np.array(labels)
                 labels = labels[:,np.newaxis]
