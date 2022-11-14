@@ -1,11 +1,6 @@
 import sys
 import tensorflow as tf
 
-supported_types = ['pooling', 'mean', 'attention']
-
-default_aggregator_options = {'use_concat': True, 'activation': 'leaky_relu'}
-default_attention_options = {'activation': 'leaky_relu'}
-
 class Aggregator(tf.keras.layers.Layer):
 
     def __init__(self, type, activation, use_concat, is_edge_feature=False, attention_options=None):

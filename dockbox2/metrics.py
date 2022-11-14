@@ -25,12 +25,12 @@ class ClassificationMetric(tf.keras.metrics.Metric):
 
     def update_state(self, labels, preds, sample_weight=None):
 
-        labels_i = tf.cast(tf.equal(labels[:, 0], self.label), tf.int64)
+        labels_i = tf.cast(tf.equal(labels[:, 0], self.label), tf.int32)
 
         if self.label == 0:
-            preds_i = tf.cast(tf.less_equal(preds[:, 0], self.threshold), tf.int64)
+            preds_i = tf.cast(tf.less_equal(preds[:, 0], self.threshold), tf.int32)
         else:
-            preds_i = tf.cast(tf.greater_equal(preds[:, 0], self.threshold), tf.int64)
+            preds_i = tf.cast(tf.greater_equal(preds[:, 0], self.threshold), tf.int32)
             
         tp = tf.math.count_nonzero(labels_i * preds_i)
         self.tp.assign_add(tf.cast(tp, tf.float32))

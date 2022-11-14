@@ -3,26 +3,25 @@ import sys
 import configparser
 
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
-                                       'depth': {'default': 2, 'type': int},
-                                       'activation': {'default': 'sigmoid'},
-                                       'nrof_neigh': {'default': 25, 'type': int},
-                                       'edge_feature': {'default': None}},
+                               'depth': {'default': 2, 'type': int},
+                               'activation': {'default': 'sigmoid'},
+                               'nrof_neigh': {'default': 25, 'type': int},
+                               'edge_feature': {'default': None}},
 
 'MINIBATCH': {'batch_size': {'default': 2, 'type': int},
               'num_parallel_calls': {'default': 1, 'type': int}},
 
 'LOSSN': {'type': {'default': 'BinaryFocalCrossentropy'},
-         'apply_class_balancing': {'default': False, 'type': bool, 'with_option': ('type', 'BinaryFocalCrossentropy')},
-         'alpha': {'default': 0.25, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
-         'gamma': {'default': 2.0, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
-         'weight': {'default': 1.0, 'type': float}},
+          'alpha': {'default': 0.5, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
+          'gamma': {'default': 2.0, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
+          'weight': {'default': 1.0, 'type': float}},
 
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': int},
-              'type': {'default': 'pooling'},
-              'use_concat': {'default': True, 'type': bool},
-              'activation': {'default': 'leaky_relu'}},
+               'type': {'default': 'pooling'},
+               'use_concat': {'default': True, 'type': bool},
+               'activation': {'default': 'leaky_relu'}},
 
 'ATTENTION': { 'shape': {'default': None, 'type': int},
                'activation': {'default': 'leaky_relu'}}
@@ -71,12 +70,15 @@ class ConfigSetup(object):
                        if section not in parameters:
                            parameters[section] = {}
 
-                       if 'type' in default_options[section][option]:
+                       option_value = config.get(section, option)
+                       if option_value.lower() == 'none':
+                           option_value = None
+
+                       elif 'type' in default_options[section][option]:
                            converter = default_options[section][option]['type']
-                           value = converter(config.get(section, option))
-                       else:
-                           value = str(config.get(section, option).strip())
-                       parameters[section][option] = value
+                           option_value = converter(option_value)
+
+                       parameters[section][option] = option_value
 
         # set default options if they have not been set
         for section in default_options:

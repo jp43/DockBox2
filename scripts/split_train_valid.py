@@ -17,11 +17,11 @@ fraction_val = 0.3
 normalize = True
 
 cutoff_correct_pose = 2.0
-max_rmsd_interpose = 5.0
+max_rmsd_interpose = 2.0
 
-downsampling = True 
-max_nsamples = 30
-min_rmsd_interpose = 0.3
+downsampling = True
+max_nsamples = 40
+min_rmsd_interpose = 0.1
 
 nargs = len(sys.argv)
 if nargs == 2:
@@ -115,6 +115,6 @@ for setname, pdbids in datasets.items():
     for pdbid in pdbids:
         dataset_graphs.append(graphs[pdbid])
 
-    with open(setname+'.pickle', "wb") as ff:
+    with open(setname+'_%iA.pickle'%max_rmsd_interpose, "wb") as ff:
         pickle.dump(dataset_graphs, ff) 
 

@@ -37,11 +37,10 @@ class GraphSAGE(tf.keras.models.Model):
 
         # performance metrics
         if self.out_shape == 1:
-            # precision
             self.precis_0 = db2mt.ClassificationMetric(0, metric='precision')
-            self.precis_1 = db2mt.ClassificationMetric(1, metric='precision')
-
             self.recall_0 = db2mt.ClassificationMetric(0, metric='recall')
+
+            self.precis_1 = db2mt.ClassificationMetric(1, metric='precision')
             self.recall_1 = db2mt.ClassificationMetric(1, metric='recall')
         else:
             self.precision = tf.keras.metrics.Precision()
@@ -52,12 +51,7 @@ class GraphSAGE(tf.keras.models.Model):
     def build_loss(self, options):
 
         loss_type = options.pop('type')
-        if hasattr(db2loss, loss_type):
-            loss_module = db2loss
-        else:
-            loss_module = tf.keras.losses
-        loss_function = getattr(loss_module, loss_type)
-
+        loss_function = getattr(db2loss, loss_type)
         return loss_function(**options)
 
     def build(self):
@@ -152,10 +146,10 @@ attention_options=self.attention_options)
 
             best_node_idx = tf.math.argmax(graph_batch_predicted_labels)
             batch_predicted_graph_labels[kdx] = tf.gather(graph_batch_predicted_labels, best_node_idx)
-            graph_labels = labels[kdx][:graph_size[kdx],:]
+            graph_batch_labels = labels[kdx][:graph_size[kdx],:]
 
-            batch_best_node_labels[kdx] = tf.gather(graph_labels, best_node_idx)
-            batch_graph_labels[kdx] = tf.reduce_any(tf.equal(graph_labels, 1))
+            batch_best_node_labels[kdx] = tf.gather(graph_batch_labels, best_node_idx)
+            batch_graph_labels[kdx] = tf.reduce_any(tf.equal(graph_batch_labels, 1))
 
         batch_predicted_graph_labels = tf.convert_to_tensor(batch_predicted_graph_labels[:,np.newaxis])
         batch_graph_labels = tf.convert_to_tensor(batch_graph_labels[:,np.newaxis])
@@ -180,13 +174,13 @@ attention_options=self.attention_options)
 
         if self.out_shape == 1:
             precis_0 = self.precis_0(labels, predicted_labels)
-            precis_1 = self.precis_1(labels, predicted_labels)
-
             recall_0 = self.recall_0(labels, predicted_labels)
+
+            precis_1 = self.precis_1(labels, predicted_labels)
             recall_1 = self.recall_1(labels, predicted_labels)
 
             f1_score = self.f1_score(labels, predicted_labels)
-            return {'precis_0': precis_0, 'precis_1': precis_1, 'recall_0': recall_0, 'recall_1': recall_1}
+            return {'precis_0': precis_0, 'recall_0': recall_0, 'precis_1': precis_1, 'recall_1': recall_1, 'f1': f1_score}
         else:
             precision = self.precision(labels, predicted_labels)
             recall = self.recall(labels, predicted_labels)
