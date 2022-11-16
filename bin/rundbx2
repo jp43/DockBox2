@@ -45,7 +45,7 @@ edge_feature = config.edge_feature
 
 # optimizer options
 optimizer_type = 'Adam'
-lr_schedule = {'initial_learning_rate': 1e-2, 'decay_steps': 1000, 'decay_rate': 0.99, 'staircase':True}
+lr_schedule = {'initial_learning_rate': 1e-3, 'decay_steps': 1000, 'decay_rate': 0.99, 'staircase':True}
 
 train = GraphDataset(args.pickfile_train, edge_feature=edge_feature)
 data_loader_train = generate_data_loader(train, depth, nrof_neigh, **config.minibatch)
@@ -64,63 +64,48 @@ optimizer_class = getattr(tf.keras.optimizers, optimizer_type)
 optimizer = optimizer_class(learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(**lr_schedule))
 
 for epoch in range(config.epochs):
-    labels, pred_labels, graph_labels, pred_graph_labels, best_node_labels = (None, None, None, None, None)
+ 
+    for jdx, data_loader in enumerate([data_loader_train, data_loader_valid]):
+        labels, pred_labels, graph_labels, pred_graph_labels, best_node_labels = (None, None, None, None, None)
+ 
+        if jdx == 0:
+            results_csv = "results_train.csv"
+        else:
+            results_csv = "results_val.csv"
 
-    for idx, data_batch in enumerate(data_loader_train):
+        for idx, data_batch in enumerate(data_loader):
 
-        with tf.GradientTape() as tape:
-            batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels, loss = model(*data_batch, training=True)
+            with tf.GradientTape() as tape:
+                batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels, loss = \
+                    model(*data_batch, training=(True if jdx == 0 else False))
+ 
+            if jdx == 0:
+                grads = tape.gradient(loss['total_loss'], model.trainable_weights)
+                optimizer.apply_gradients(zip(grads, model.trainable_weights))
+ 
+            is_first = (True if idx == 0 else False)
+            labels = append_batch_results(labels, batch_labels, first=is_first)
+            pred_labels = append_batch_results(pred_labels, batch_pred_labels, first=is_first)
+ 
+            graph_labels = append_batch_results(graph_labels, batch_graph_labels, first=is_first)
 
-        grads = tape.gradient(loss['total_loss'], model.trainable_weights)
-        optimizer.apply_gradients(zip(grads, model.trainable_weights))
-
-        is_first = (True if idx == 0 else False)
-        labels = append_batch_results(labels, batch_labels, first=is_first)
-        pred_labels = append_batch_results(pred_labels, batch_pred_labels, first=is_first)
-
-        graph_labels = append_batch_results(graph_labels, batch_graph_labels, first=is_first)
-        pred_graph_labels = append_batch_results(pred_graph_labels, batch_pred_graph_labels, first=is_first)
-        best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first)
-
-    loss_values = model.call_loss(labels, pred_labels, graph_labels, pred_graph_labels)
-    metrics_values = model.call_metrics(labels, pred_labels)
-
-    success_rate = model.success_rate(graph_labels, pred_graph_labels, best_node_labels)
-
-    if epoch == 0:
-        saved_file_mode = "w"
-    else:
-        saved_file_mode = "a"
-
-    with open("results_train.csv", saved_file_mode) as train_f:
+            pred_graph_labels = append_batch_results(pred_graph_labels, batch_pred_graph_labels, first=is_first)
+            best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first)
+ 
+        loss_values = model.call_loss(labels, pred_labels, graph_labels, pred_graph_labels)
+        metrics_values = model.call_metrics(labels, pred_labels)
+ 
+        success_rate = model.success_rate(graph_labels, pred_graph_labels, best_node_labels)
+ 
         if epoch == 0:
-            train_f.write("epoch," + ','.join(metrics_values.keys()) + ",success_rate," + ','.join(loss_values.keys())+"\n")
-        train_f.write(str(epoch) + ',' + ','.join(['%.5f'%value \
-                      for value in {**metrics_values, 'success': success_rate, **loss_values}.values()])+'\n')
+            saved_file_mode = "w"
+        else:
+            saved_file_mode = "a"
 
-    labels, pred_labels, graph_labels, pred_graph_labels, best_node_labels = (None, None, None, None, None)
+        with open(results_csv, saved_file_mode) as csvf:
+            if epoch == 0:
+                csvf.write("epoch," + ','.join(metrics_values.keys()) + ",success_rate," + ','.join(loss_values.keys())+"\n")
+            csvf.write(str(epoch) + ',' + ','.join(['%.5f'%value \
+                          for value in {**metrics_values, 'success': success_rate, **loss_values}.values()])+'\n')
 
-    for idx, data_batch in enumerate(data_loader_valid):
-
-        with tf.GradientTape() as tape:
-            batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels, loss = model(*data_batch, training=False)
-
-        is_first = (True if idx == 0 else False)
-        labels = append_batch_results(labels, batch_labels, first=is_first)
-        pred_labels = append_batch_results(pred_labels, batch_pred_labels, first=is_first)
-
-        graph_labels = append_batch_results(graph_labels, batch_graph_labels, first=is_first)
-        pred_graph_labels = append_batch_results(pred_graph_labels, batch_pred_graph_labels, first=is_first)
-        best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first)
-
-    loss_values = model.call_loss(labels, pred_labels, graph_labels, pred_graph_labels)
-    metrics_values = model.call_metrics(labels, pred_labels)
-
-    success_rate = model.success_rate(graph_labels, pred_graph_labels, best_node_labels)
-
-    with open("results_val.csv", saved_file_mode) as valid_f:
-        if epoch == 0:
-            valid_f.write("epoch," + ','.join(metrics_values.keys()) + ",success_rate"+"\n")
-        valid_f.write(str(epoch) + ',' + ','.join(['%.5f'%value \
-                      for value in {**metrics_values, 'success': success_rate}.values()])+'\n')
     time.sleep(1)
