@@ -3,7 +3,7 @@ import tensorflow as tf
 
 class Aggregator(tf.keras.layers.Layer):
 
-    def __init__(self, type, activation, use_concat, is_edge_feature=False, attention_options=None):
+    def __init__(self, type, activation, use_concat, is_edge_feature=False, gat_options=None):
 
         super(Aggregator, self).__init__()
 
@@ -16,17 +16,17 @@ class Aggregator(tf.keras.layers.Layer):
         if self.is_edge_feature:
             self.edge_activation = getattr(tf.nn, activation)
 
-        if self.type == 'attention':
-            attention_activation = attention_options['activation']
-            self.attention_layer = AttentionLayer(attention_activation)
+        if self.type == 'gat':
+            self.gat_layer = GATLayer(gat_options['activation'])
 
-    def build(self, input_shape, output_shape, attention_shape=None):
+
+    def build(self, input_shape, output_shape, gat_shape=None):
 
         if self.is_edge_feature:
             self.edge_layer = tf.keras.layers.Dense(input_shape, input_shape=(input_shape+1,), name='edge_layer')
 
-        if self.type == 'attention':
-            self.attention_layer.build(input_shape, attention_shape)
+        if self.type == 'gat':
+            self.gat_layer.build(input_shape, gat_shape)
 
         self.self_layer = tf.keras.layers.Dense(output_shape, input_shape=(input_shape,), name='self_layer')
         self.self_layer.build((input_shape, ))
@@ -38,6 +38,7 @@ class Aggregator(tf.keras.layers.Layer):
         self.bn.build((None, (self.use_concat+1)*output_shape))
 
         super(Aggregator, self).build(())
+
 
     def call(self, self_feats, neigh_feats, neigh_edge_feats, nneigh, training=True):
 
@@ -54,10 +55,9 @@ class Aggregator(tf.keras.layers.Layer):
         elif self.type == 'mean':
             aggregated_feats = tf.divide(tf.reduce_sum(extracted_neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
 
-        elif self.type == 'attention':
-            attention_weights = self.attention_layer(self_feats, extracted_neigh_feats, training=training)
+        elif self.type == 'gat':
+            attention_weights = self.gat_layer(self_feats, extracted_neigh_feats, training=training)
             aggregated_feats = tf.reduce_sum(tf.multiply(attention_weights, extracted_neigh_feats), axis=1)
-
         else:
             sys.exit("Unrecognized type aggregator %s"%self.type)
 
@@ -74,12 +74,14 @@ class Aggregator(tf.keras.layers.Layer):
 
         return self_feats
 
-class AttentionLayer(tf.keras.layers.Layer):
+
+class GATLayer(tf.keras.layers.Layer):
 
     def __init__(self, activation):
 
-        super(AttentionLayer, self).__init__()
+        super(GATLayer, self).__init__()
         self.activation = getattr(tf.nn, activation)
+
 
     def build(self, input_shape, attention_shape):
 
@@ -92,7 +94,8 @@ class AttentionLayer(tf.keras.layers.Layer):
         self.output_layer = tf.keras.layers.Dense(1, input_shape=(2*attention_shape,), name='output_layer')
         self.output_layer.build((2*attention_shape,))
 
-        super(AttentionLayer, self).build(())
+        super(GATLayer, self).build(())
+
 
     def call(self, self_feats, neigh_feats, training=True):
 

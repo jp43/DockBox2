@@ -8,6 +8,7 @@ import numpy as np
 
 import tensorflow as tf
 
+
 class GraphDataset(object):
 
     def __init__(self, filename, edge_feature=None):
@@ -59,6 +60,7 @@ class GraphDataset(object):
         for kdx, graph in enumerate(graphs):
             self.graph_size.append(len(graph))
 
+
     def __sample(self, graph_id, depth, nrof_neigh):
 
         graph_size = self.graph_size[graph_id]
@@ -94,6 +96,7 @@ class GraphDataset(object):
         return np.asarray(feats, np.float32), graph_size, np.asarray(neigh_indices, dtype=np.int32), \
                np.asarray(adj_mask, dtype=np.float32), np.asarray(edge_feats_mask, dtype=np.float32), \
                np.asarray(nneigh, dtype=np.float32), labels
+
 
     def sample(self, graph_id, depth, nrof_neigh):
 

@@ -2,9 +2,10 @@ import tensorflow as tf
 
 class ClassificationMetric(tf.keras.metrics.Metric):
 
-    def __init__(self, label=0, threshold=0.5, metric='precision', **kwargs):
+    def __init__(self, label=0, threshold=0.5, metric='precision', level='node', **kwargs):
 
-        super(ClassificationMetric, self).__init__(name=metric+'_%i'%label, **kwargs)
+        graph_suffix = ('_g' if level == 'graph' else '')
+        super(ClassificationMetric, self).__init__(name=metric+'_'+str(label)+graph_suffix, **kwargs)
 
         self.threshold = threshold
         self.metric = metric

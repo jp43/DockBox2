@@ -23,8 +23,8 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                'use_concat': {'default': True, 'type': bool},
                'activation': {'default': 'leaky_relu'}},
 
-'ATTENTION': { 'shape': {'default': None, 'type': int},
-               'activation': {'default': 'leaky_relu'}}
+'GAT': { 'shape': {'default': None, 'type': int},
+         'activation': {'default': 'leaky_relu'}}
 }
 
 default_options['LOSSG'] = default_options['LOSSN']
@@ -113,4 +113,4 @@ class ConfigSetup(object):
                      'loss_reg': parameters['LOSSR']}
 
         self.aggregator = parameters['AGGREGATOR']
-        self.attention = parameters['ATTENTION']
+        self.gat = parameters['GAT']

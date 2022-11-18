@@ -6,11 +6,11 @@ import tensorflow_addons as tfa
 from dockbox2.aggregators import *
 
 from dockbox2 import loss as db2loss
-from dockbox2 import metrics as db2mt
+from dockbox2 import metrics as mt
 
 class GraphSAGE(tf.keras.models.Model):
 
-    def __init__(self, in_shape, out_shape, activation, depth, nrof_neigh, loss_options, aggregator_options, is_edge_feature=False, attention_options=None):
+    def __init__(self, in_shape, out_shape, activation, depth, nrof_neigh, loss_options, aggregator_options, is_edge_feature=False, gat_options=None):
         super(GraphSAGE, self).__init__()
 
         self.in_shape = in_shape
@@ -26,7 +26,7 @@ class GraphSAGE(tf.keras.models.Model):
         self.aggregator_options = aggregator_options
 
         self.is_edge_feature = is_edge_feature
-        self.attention_options = attention_options
+        self.gat_options = gat_options
 
         # node-level loss functions
         self.loss_n_function = self.build_loss(loss_options['loss_n'])
@@ -36,26 +36,35 @@ class GraphSAGE(tf.keras.models.Model):
         self.loss_g_function = self.build_loss(loss_options['loss_g'])
 
         # performance metrics
-        if self.out_shape == 1:
-            self.precis_0 = db2mt.ClassificationMetric(0, metric='precision')
-            self.recall_0 = db2mt.ClassificationMetric(0, metric='recall')
+        self.metrics_fn = {}
+        for level in ['node', 'graph']:
+            self.metrics_fn[level] = {}
 
-            self.precis_1 = db2mt.ClassificationMetric(1, metric='precision')
-            self.recall_1 = db2mt.ClassificationMetric(1, metric='recall')
-        else:
-            self.precision = tf.keras.metrics.Precision()
-            self.recall = tf.keras.metrics.Recall()
+            if self.out_shape == 1:
+                # precision and recall for class 0
+                self.metrics_fn[level]['precision_0'] = mt.ClassificationMetric(0, metric='precision', level=level)
+                self.metrics_fn[level]['recall_0'] = mt.ClassificationMetric(0, metric='recall', level=level)
 
-        self.f1_score = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
+                # precision and recall for class 1
+                self.metrics_fn[level]['precision_1'] = mt.ClassificationMetric(1, metric='precision', level=level)
+                self.metrics_fn[level]['recall_1'] = mt.ClassificationMetric(1, metric='recall', level=level)
+
+                # f1 score
+                self.metrics_fn[level]['f1'] = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
+            else:
+                # precision and recall
+                self.metrics_fn[level]['precision'] = tf.keras.metrics.Precision()
+                self.metrics_fn[level]['recall'] = tf.keras.metrics.Recall()
+
+                self.metrics_fn[level]['f1'] = tfa.metrics.F1Score(num_classes=out_shape, average='micro', threshold=0.5)
 
     def build_loss(self, options):
-
         loss_type = options.pop('type')
         loss_function = getattr(db2loss, loss_type)
+
         return loss_function(**options)
 
     def build(self):
-
         aggregator_options = self.aggregator_options
 
         aggregator_type = aggregator_options.pop('type')
@@ -67,28 +76,29 @@ class GraphSAGE(tf.keras.models.Model):
         self.aggregator_layers = []
         for idx in range(self.depth):
             aggregator_layer = Aggregator(aggregator_type, aggregator_activation, use_concat, is_edge_feature=self.is_edge_feature, \
-attention_options=self.attention_options)
+                                  gat_options=self.gat_options)
 
             if idx == 0:
                 in_shape = self.in_shape
             else:
                 in_shape = (use_concat+1)*aggregator_shape
 
-            if aggregator_type == 'attention':
-                if 'attention_shape' not in self.attention_options:
-                    attention_shape = in_shape
+            if aggregator_type.lower() == 'gat':
+                if 'shape' not in self.gat_options:
+                    gat_shape = in_shape
                 else:
-                    attention_shape = self.attention_options['shape']
+                    gat_shape = self.gat_options['shape']
             else:
-                attention_shape = None
+                gat_shape = None
 
-            aggregator_layer.build(in_shape, aggregator_shape, attention_shape=attention_shape)
+            aggregator_layer.build(in_shape, aggregator_shape, gat_shape=gat_shape)
             self.aggregator_layers.append(aggregator_layer)
 
         self.output_layer = tf.keras.layers.Dense(self.out_shape, input_shape=((use_concat+1)*aggregator_shape,), name='output_layer')
         self.output_layer.build(((use_concat+1)*aggregator_shape,))
 
         super(GraphSAGE, self).build(())
+
 
     def call(self, feats, graph_size, neigh_indices, adj_mask, edge_feats_mask, nneigh, labels, training=True):
 
@@ -159,6 +169,7 @@ attention_options=self.attention_options)
         loss = self.call_loss(batch_labels, batch_predicted_labels, batch_graph_labels, batch_predicted_graph_labels, regularization=True)
         return batch_labels, batch_predicted_labels, batch_graph_labels, batch_predicted_graph_labels, batch_best_node_labels, loss
 
+
     def call_loss(self, labels, predicted_labels, graph_labels, predicted_graph_labels, regularization=True):
 
         loss_n = self.loss_n_function(labels, predicted_labels)
@@ -170,23 +181,31 @@ attention_options=self.attention_options)
         else:
             return {'total_loss': loss_n + loss_g, 'loss_n': loss_n, 'loss_g': loss_g}
 
-    def call_metrics(self, labels, predicted_labels):
+    def call_metrics(self, labels, predicted_labels, level='node'):
+
+        metrics_fn = self.metrics_fn[level]
+        graph_suffix = '_g' if level == 'graph' else ''
 
         if self.out_shape == 1:
-            precis_0 = self.precis_0(labels, predicted_labels)
-            recall_0 = self.recall_0(labels, predicted_labels)
+            precision_0 = metrics_fn['precision_0'](labels, predicted_labels)
+            recall_0 = metrics_fn['recall_0'](labels, predicted_labels)
 
-            precis_1 = self.precis_1(labels, predicted_labels)
-            recall_1 = self.recall_1(labels, predicted_labels)
+            precision_1 = metrics_fn['precision_1'](labels, predicted_labels)
+            recall_1 = metrics_fn['recall_1'](labels, predicted_labels)
 
-            f1_score = self.f1_score(labels, predicted_labels)
-            return {'precis_0': precis_0, 'recall_0': recall_0, 'precis_1': precis_1, 'recall_1': recall_1, 'f1': f1_score}
+            f1_score = metrics_fn['f1'](labels, predicted_labels)
+
+            return {'precision_0'+graph_suffix: precision_0, 'recall_0'+graph_suffix: recall_0, 'precision_1'+graph_suffix: precision_1,
+               'recall_1'+graph_suffix: recall_1, 'f1'+graph_suffix: f1_score}
+
         else:
-            precision = self.precision(labels, predicted_labels)
-            recall = self.recall(labels, predicted_labels)
+            precision = metrics_fn['precision'](labels, predicted_labels)
+            recall = metrics_fn['recall'](labels, predicted_labels)
 
-            f1_score = self.f1_score(labels, predicted_labels)
-            return {'precision': precision, 'recall': recall, 'f1': f1_score}
+            f1_score = metrics_fn['f1'](labels, predicted_labels)
+
+            return {'precision'+graph_suffix: precision, 'recall'+graph_suffix: recall, 'f1'+graph_suffix: f1_score}
+
 
     def success_rate(self, graph_labels, pred_graph_labels, best_node_labels, threshold=0.5):
 
