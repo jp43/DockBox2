@@ -1,11 +1,13 @@
 import tensorflow as tf
+from dockbox2.utils import *
 
-class ClassificationMetric(tf.keras.metrics.Metric):
+class ClsMetric(tf.keras.metrics.Metric):
 
     def __init__(self, label=0, threshold=0.5, metric='precision', level='node', **kwargs):
 
-        graph_suffix = ('_g' if level == 'graph' else '')
-        super(ClassificationMetric, self).__init__(name=metric+'_'+str(label)+graph_suffix, **kwargs)
+        graph_suffix = '_graph' if level == 'graph' else ''
+        name = abbreviation[metric] + str(label) + graph_suffix
+        super(ClsMetric, self).__init__(name=name, **kwargs)
 
         self.threshold = threshold
         self.metric = metric

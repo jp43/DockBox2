@@ -8,47 +8,48 @@ import numpy as np
 
 import tensorflow as tf
 
-
 class GraphDataset(object):
 
-    def __init__(self, filename, edge_feature=None):
+    def __init__(self, filename, edge_options):
 
         with open(filename, "rb") as ff:
            graphs = pickle.load(ff)
 
         self.graph_feats = []
         self.graph_labels = []
-        self.graph_adj_list = []
 
-        self.edge_feature = edge_feature
-        if edge_feature is None:
-            self.graph_edge_feats = None
-        else:
-            self.graph_edge_feats = []
+        self.graph_adj_list = []
+        self.graph_edge_feats = []
 
         for graph in graphs:
             feats = []
             labels = []
 
+            # load features and labels
             for node, data in graph.nodes(data=True):
                 feats.append(data['feature'])
                 labels.append(data['label'])
 
-            adj = nx.adjacency_matrix(graph).toarray()
-            self.graph_adj_list.append(adj)
             self.graph_feats.append(np.array(feats))
 
-            if edge_feature is not None:
-                edge_feats = nx.to_numpy_array(graph, weight=edge_feature)
-                #assert ((adj==1) == (edge_feats>.0)).all()
-                self.graph_edge_feats.append(edge_feats)
-                 
             if isinstance(labels[0], int):
                 labels = np.array(labels)
                 labels = labels[:,np.newaxis]
             else:
                 labels = np.array(labels)
             self.graph_labels.append(labels)
+
+            # load adjacency matrix
+            adj = nx.adjacency_matrix(graph).toarray()
+            self.graph_adj_list.append(adj)
+
+            if edge_options['type'] == 'rmsd':
+                # load rmsd values as edge feats
+                edge_feats = nx.to_numpy_array(graph, weight='rmsd')
+
+            elif edge_options['type'] is None:
+                edge_feats = np.zeros_like(adj, dtype=float)
+            self.graph_edge_feats.append(edge_feats)
 
         self.max_nrof_nodes = max([len(graph) for graph in graphs])
         self.nfeats = self.graph_feats[0].shape[1]
@@ -60,15 +61,11 @@ class GraphDataset(object):
         for kdx, graph in enumerate(graphs):
             self.graph_size.append(len(graph))
 
-
     def __sample(self, graph_id, depth, nrof_neigh):
 
         graph_size = self.graph_size[graph_id]
-        adj = self.graph_adj_list[graph_id]
-
-        edge_feats = None 
-        if self.edge_feature is not None:
-            edge_feats = self.graph_edge_feats[graph_id]
+        graph_adj = self.graph_adj_list[graph_id]
+        edge_feats = self.graph_edge_feats[graph_id]
 
         diff = self.max_nrof_nodes - graph_size
 
@@ -82,7 +79,7 @@ class GraphDataset(object):
             feats = self.graph_feats[graph_id]
             labels = self.graph_labels[graph_id]
 
-        neigh_indices, adj_mask, edge_feats_mask, nneigh = sample_neighbors(adj, edge_feats, graph_size, depth, nrof_neigh)
+        neigh_indices, adj_mask, edge_feats_mask, nneigh = sample_neighbors(graph_adj, edge_feats, graph_size, depth, nrof_neigh)
 
         for idx in range(depth):
             if diff > 0:
@@ -116,7 +113,7 @@ def generate_data_loader(dataset, depth, nrof_neigh, num_parallel_calls=1, batch
     return data_loader
 
 
-def sample_neighbors(adj, edge_feats, graph_size, depth, nrof_neigh):
+def sample_neighbors(graph_adj, edge_feats, graph_size, depth, nrof_neigh):
     neigh_indices = []
     adj_mask = []
     edge_feats_mask = []
@@ -131,7 +128,7 @@ def sample_neighbors(adj, edge_feats, graph_size, depth, nrof_neigh):
 
         for jdx in range(graph_size):
             # get indices of neighbors of node jdx
-            node_neigh_indices = np.where(adj[jdx] != 0)[0]
+            node_neigh_indices = np.where(graph_adj[jdx] != 0)[0]
 
             # get indices of non neighbors
             node_non_neigh_indices = np.setdiff1d(np.arange(graph_size), node_neigh_indices)
@@ -146,13 +143,9 @@ def sample_neighbors(adj, edge_feats, graph_size, depth, nrof_neigh):
                 node_neigh_indices = np.concatenate([node_neigh_indices, [node_non_neigh_indices[0]]*(nrof_neigh - node_nneigh)])
 
             graph_neigh_indices.append(node_neigh_indices)
-            graph_adj_mask.append(adj[jdx][node_neigh_indices])
+            graph_adj_mask.append(graph_adj[jdx][node_neigh_indices])
 
-            if edge_feats is None:
-                graph_edge_feats_mask.append(np.zeros_like(node_neigh_indices))
-            else:
-                graph_edge_feats_mask.append(edge_feats[jdx][node_neigh_indices])
-
+            graph_edge_feats_mask.append(edge_feats[jdx][node_neigh_indices])
             graph_nneigh.append(node_nneigh)
 
         neigh_indices.append(graph_neigh_indices)

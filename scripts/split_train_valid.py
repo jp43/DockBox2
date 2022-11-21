@@ -17,10 +17,10 @@ fraction_val = 0.3
 normalize = True
 
 cutoff_correct_pose = 2.0
-max_rmsd_interpose = 2.0
+max_rmsd_interpose = 5.0
 
 downsampling = True
-max_nsamples = 40
+max_nsamples = 50
 min_rmsd_interpose = 0.1
 
 nargs = len(sys.argv)

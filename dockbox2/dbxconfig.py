@@ -1,33 +1,43 @@
 import os 
 import sys
+import re
 import configparser
+import copy
 
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
-                               'activation': {'default': 'sigmoid'},
-                               'nrof_neigh': {'default': 25, 'type': int},
-                               'edge_feature': {'default': None}},
+                               'nrof_neigh': {'default': 25, 'type': int}},
 
 'MINIBATCH': {'batch_size': {'default': 2, 'type': int},
               'num_parallel_calls': {'default': 1, 'type': int}},
 
-'LOSSN': {'type': {'default': 'BinaryFocalCrossentropy'},
-          'alpha': {'default': 0.5, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
-          'gamma': {'default': 2.0, 'type': float, 'with_option': ('type', 'BinaryFocalCrossentropy')},
+'LOSSN': {'type': {'default': 'BinaryFocalCrossentropy', 'among': ['BinaryFocalCrossentropy', 'BinaryCrossEntropyLoss']},
+          'alpha': {'default': 0.5, 'type': float, 'with': ('type', 'BinaryFocalCrossentropy')},
+          'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossentropy')},
           'weight': {'default': 1.0, 'type': float}},
 
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
-'AGGREGATOR': {'shape': {'required': True, 'type': int},
-               'type': {'default': 'pooling'},
+'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
+               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'attention']},
                'use_concat': {'default': True, 'type': bool},
-               'activation': {'default': 'leaky_relu'}},
+               'activation': {'default': 'relu'}},
 
-'GAT': { 'shape': {'default': None, 'type': int},
-         'activation': {'default': 'leaky_relu'}}
+'ATTENTION': { 'shape': {'default': None, 'type': 'shape'},
+               'activation': {'default': 'relu'}},
+
+'EDGE': {'type': {'default': None, 'among': [None, 'rmsd']},
+         'depth': {'default': 1, 'type': int},
+         'activation': {'default': 'relu'},
+         'offset': {'default': False, 'type': bool}},
+
+'CLASSIFIER': {'shape': {'default': '1', 'type': 'shape'},
+               'activation_h': {'default': 'relu'},
+               'activation': {'default': 'sigmoid'}},
 }
 
-default_options['LOSSG'] = default_options['LOSSN']
+default_options['LOSSG'] = copy.deepcopy(default_options['LOSSN'])
+default_options['LOSSG']['weight']['default'] = .0
 
 class ConfigSetup(object):
 
@@ -71,13 +81,29 @@ class ConfigSetup(object):
                            parameters[section] = {}
 
                        option_value = config.get(section, option)
+                       options_settings = default_options[section][option]
+
                        if option_value.lower() == 'none':
                            option_value = None
 
-                       elif 'type' in default_options[section][option]:
-                           converter = default_options[section][option]['type']
-                           option_value = converter(option_value)
+                       # converting option
+                       elif 'type' in options_settings and options_settings['type'] != 'shape':
 
+                           if options_settings['type'] != bool:
+                               converter = options_settings['type']
+                               option_value = converter(option_value)
+
+                           elif option_value.lower() in ['true', 'yes', '1']:
+                               option_value = True
+                           elif option_value.lower() in ['false', 'no', '0']:
+                               option_value = False
+                           else:
+                               raise ValueError("Option %s in section %s should be boolean!"%(option, section))
+
+                       if 'among' in options_settings and option_value not in options_settings['among']:
+                           known_values = ', '.join(list(map(str, options_settings['among'])))
+                           raise ValueError("Option %s in section %s should be among %s"%(option, section, known_values))
+                       
                        parameters[section][option] = option_value
 
         # set default options if they have not been set
@@ -90,11 +116,27 @@ class ConfigSetup(object):
                     if option not in parameters[section]:
                         parameters[section][option] = properties['default']
 
+        # set shape type options
+        for section in default_options:
+            for option, properties in default_options[section].items():
+
+                if 'type' in properties and default_options[section][option]['type'] == 'shape':
+                    value = parameters[section][option]
+                    value = list(map(int, re.sub(r'[()]', '', value).split(',')))
+
+                    if section == 'AGGREGATOR':
+                        depth = parameters['GENERAL']['depth']
+                        if len(value) == 1:
+                            value = value*depth
+                        elif len(value) != depth:
+                            raise ValueError("Aggregator shapes should match depth option in GENERAL section!")
+                    parameters[section][option] = value
+
         # remove unrelated options
         for section in default_options:
             for option, properties in default_options[section].items():
-                if 'with_option' in properties:
-                    related_option, value = properties['with_option']
+                if 'with' in properties:
+                    related_option, value = properties['with']
 
                     if parameters[section][related_option] != value:
                         parameters[section].pop(option)
@@ -103,14 +145,25 @@ class ConfigSetup(object):
         self.epochs = parameters['GENERAL']['epochs']
         self.depth = parameters['GENERAL']['depth']
 
-        self.activation = parameters['GENERAL']['activation']
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
-        self.edge_feature = parameters['GENERAL']['edge_feature']
 
         self.minibatch = parameters['MINIBATCH']
-        self.loss = {'loss_n': parameters['LOSSN'], 
-                     'loss_g': parameters['LOSSG'],
-                     'loss_reg': parameters['LOSSR']}
+        self.loss = {'loss_n': parameters['LOSSN'],
+            'loss_g': parameters['LOSSG'],
+            'loss_reg': parameters['LOSSR']}
 
         self.aggregator = parameters['AGGREGATOR']
-        self.gat = parameters['GAT']
+        self.attention = parameters['ATTENTION']
+
+        self.classifier = parameters['CLASSIFIER']
+        self.edge_options = parameters['EDGE']
+
+    def pretty_print(self):
+
+        for attribute in ['loss', 'aggregator', 'classifier', 'edge_options', 'attention']:
+            options = getattr(self, attribute)
+            options_info = ""
+            for key, value in options.items():
+                options_info += str(key) + ': ' + str(value) + ', '
+
+            print(attribute.upper()+':', options_info[:-2])
