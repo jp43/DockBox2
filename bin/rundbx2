@@ -4,8 +4,8 @@ import sys
 import argparse
 import time
 
-os.environ['AUTOGRAPH_VERBOSITY'] = '1'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(2)
+os.environ['PYTHONHASHSEED'] = str(2)
 
 from dockbox2.datasets import *
 from dockbox2 import dbxconfig
@@ -35,9 +35,24 @@ parser.add_argument('-f',
     required=True,
     help='config file containing model parameters')
 
+parser.add_argument('-p',
+    dest='patience',
+    default=3,
+    type=int,    
+    help='Patience used for early stopping.')
+
+parser.add_argument('--seed',
+    dest='seed',
+    default=None,
+    type=int,
+    help='Random seed')
+
 # update parsers with arguments
 args = parser.parse_args()
 config = dbxconfig.ConfigSetup(args.config_file)
+
+if args.seed is not None:
+    set_seed(args.seed)
 
 depth = config.depth
 classifier = config.classifier
@@ -45,41 +60,50 @@ nrof_neigh = config.nrof_neigh
 
 config.pretty_print()
 
-# optimizer options
-optimizer_type = 'Adam'
-lr_schedule = {'initial_learning_rate': 1e-3, 'decay_steps': 1000, 'decay_rate': 0.99, 'staircase':True}
-
 train = GraphDataset(args.pickfile_train, config.edge_options)
 data_loader_train = generate_data_loader(train, depth, nrof_neigh, **config.minibatch)
 
 valid = GraphDataset(args.pickfile_val, config.edge_options)
 data_loader_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch)
 
-model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, config.loss, config.aggregator, config.classifier, \
-            config.edge_options, attention_options=config.attention)
+model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, config.loss, config.aggregator, config.classifier, config.edge_options)
 
 model.build()
 model.summary()
 
-# set optimizer
-optimizer_class = getattr(tf.keras.optimizers, optimizer_type)
-optimizer = optimizer_class(learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(**lr_schedule))
+# set Adam optimizer
+optimizer_class = getattr(tf.keras.optimizers, 'Adam')
+optimizer = optimizer_class(learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(**config.optimizer))
+
+best_loss = 100
+loc_patience = 0
 
 for epoch in range(config.epochs): 
-    for jdx, data_loader in enumerate([data_loader_train, data_loader_valid]):
+
+    if loc_patience >= args.patience:
+       print("\n'EarlyStopping' called!\n")
+       break
+
+    for kdx, data_loader in enumerate([data_loader_train, data_loader_valid]):
         labels, pred_labels, graph_labels, pred_graph_labels, best_node_labels = (None, None, None, None, None)
  
-        for idx, data_batch in enumerate(data_loader):
+        for idx_batch, data_batch in enumerate(data_loader):
+            if kdx == 0:
+                # train model from training set
+                with tf.GradientTape() as tape:
+                    batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels = \
+                        model(*data_batch, training=True)
+                    loss = model.call_loss(batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels)
 
-            with tf.GradientTape() as tape:
-                batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels, loss = \
-                    model(*data_batch, training=(True if jdx == 0 else False))
- 
-            if jdx == 0:
                 grads = tape.gradient(loss['total_loss'], model.trainable_weights)
                 optimizer.apply_gradients(zip(grads, model.trainable_weights))
+
+            else:
+                # check predictions for validation set
+                batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels = \
+                        model(*data_batch, training=False)
  
-            is_first = True if idx == 0 else False
+            is_first = True if idx_batch == 0 else False
             labels = append_batch_results(labels, batch_labels, first=is_first)
             pred_labels = append_batch_results(pred_labels, batch_pred_labels, first=is_first)
  
@@ -88,14 +112,19 @@ for epoch in range(config.epochs):
             pred_graph_labels = append_batch_results(pred_graph_labels, batch_pred_graph_labels, first=is_first)
             best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first)
  
+        # call loss
         loss_values = model.call_loss(labels, pred_labels, graph_labels, pred_graph_labels)
+
+        # call metrics
         metrics_values = model.call_metrics(labels, pred_labels)
         graph_metrics_values = model.call_metrics(graph_labels, pred_graph_labels, level='graph')
  
+        # compute success rate
         success_rate = model.success_rate(graph_labels, pred_graph_labels, best_node_labels)
 
+        # save results in .csv file
         saved_file_mode = "w" if epoch == 0 else "a"
-        results_csv = "results_train.csv" if jdx == 0 else "results_val.csv"
+        results_csv = "results_train.csv" if kdx == 0 else "results_val.csv"
 
         with open(results_csv, saved_file_mode) as csvf:
             if epoch == 0:
@@ -104,5 +133,12 @@ for epoch in range(config.epochs):
 
             csvf.write(str(epoch) + ',' + ','.join(['%.5f'%value \
                           for value in {**metrics_values, **graph_metrics_values, 'success': success_rate, **loss_values}.values()])+'\n')
+
+        # check if loss value for validation set has increased
+        if kdx == 1 and loss_values['total_loss'] < best_loss:
+            best_loss = loss_values['total_loss']
+            loc_patience = 0
+        else:
+            loc_patience += 1
 
     time.sleep(1)

@@ -1,3 +1,5 @@
+import sys
+
 import tensorflow as tf
 from dockbox2.utils import *
 
@@ -13,6 +15,8 @@ class ClsMetric(tf.keras.metrics.Metric):
         self.metric = metric
 
         self.label = label
+        self.level = level
+
         if self.label not in [0, 1]:
             sys.exit("Label should be 0 or 1 not %s"%label)
 
@@ -34,7 +38,7 @@ class ClsMetric(tf.keras.metrics.Metric):
             preds_i = tf.cast(tf.less_equal(preds[:, 0], self.threshold), tf.int32)
         else:
             preds_i = tf.cast(tf.greater_equal(preds[:, 0], self.threshold), tf.int32)
-            
+ 
         tp = tf.math.count_nonzero(labels_i * preds_i)
         self.tp.assign_add(tf.cast(tp, tf.float32))
 

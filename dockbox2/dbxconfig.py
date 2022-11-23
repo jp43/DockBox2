@@ -11,6 +11,11 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'MINIBATCH': {'batch_size': {'default': 2, 'type': int},
               'num_parallel_calls': {'default': 1, 'type': int}},
 
+'OPTIMIZER': {'initial_learning_rate': {'default': 1e-3, 'type': float},
+              'decay_steps': {'default': 1000, 'type': int},
+              'decay_rate': {'default': 0.99, 'type': float},
+              'staircase': {'default': True, 'type': bool}},
+
 'LOSSN': {'type': {'default': 'BinaryFocalCrossentropy', 'among': ['BinaryFocalCrossentropy', 'BinaryCrossEntropyLoss']},
           'alpha': {'default': 0.5, 'type': float, 'with': ('type', 'BinaryFocalCrossentropy')},
           'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossentropy')},
@@ -19,17 +24,13 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
-               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'attention']},
+               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean']},
                'use_concat': {'default': True, 'type': bool},
-               'activation': {'default': 'relu'}},
-
-'ATTENTION': { 'shape': {'default': None, 'type': 'shape'},
                'activation': {'default': 'relu'}},
 
 'EDGE': {'type': {'default': None, 'among': [None, 'rmsd']},
          'depth': {'default': 1, 'type': int},
-         'activation': {'default': 'relu'},
-         'offset': {'default': False, 'type': bool}},
+         'activation': {'default': 'relu'}},
 
 'CLASSIFIER': {'shape': {'default': '1', 'type': 'shape'},
                'activation_h': {'default': 'relu'},
@@ -122,15 +123,16 @@ class ConfigSetup(object):
 
                 if 'type' in properties and default_options[section][option]['type'] == 'shape':
                     value = parameters[section][option]
-                    value = list(map(int, re.sub(r'[()]', '', value).split(',')))
+                    if value is not None:
+                        value = list(map(int, re.sub(r'[()]', '', value).split(',')))
 
-                    if section == 'AGGREGATOR':
-                        depth = parameters['GENERAL']['depth']
-                        if len(value) == 1:
-                            value = value*depth
-                        elif len(value) != depth:
-                            raise ValueError("Aggregator shapes should match depth option in GENERAL section!")
-                    parameters[section][option] = value
+                        if section == 'AGGREGATOR':
+                            depth = parameters['GENERAL']['depth']
+                            if len(value) == 1:
+                                value = value*depth
+                            elif len(value) != depth:
+                                raise ValueError("Aggregator shapes should match depth option in GENERAL section!")
+                        parameters[section][option] = value
 
         # remove unrelated options
         for section in default_options:
@@ -152,18 +154,21 @@ class ConfigSetup(object):
             'loss_g': parameters['LOSSG'],
             'loss_reg': parameters['LOSSR']}
 
+        self.general = parameters['GENERAL']
+        self.optimizer = parameters['OPTIMIZER']
         self.aggregator = parameters['AGGREGATOR']
-        self.attention = parameters['ATTENTION']
 
         self.classifier = parameters['CLASSIFIER']
         self.edge_options = parameters['EDGE']
 
     def pretty_print(self):
 
-        for attribute in ['loss', 'aggregator', 'classifier', 'edge_options', 'attention']:
+        print("******************************************")
+        for attribute in ['classifier', 'minibatch', 'general', 'aggregator', 'edge_options', 'classifier', 'loss']:
             options = getattr(self, attribute)
             options_info = ""
+
             for key, value in options.items():
                 options_info += str(key) + ': ' + str(value) + ', '
-
             print(attribute.upper()+':', options_info[:-2])
+        print("******************************************")
