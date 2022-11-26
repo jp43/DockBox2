@@ -167,10 +167,10 @@ class GraphSAGE(tf.keras.models.Model):
             # update node features
             self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, nneigh_per_graph, training=training)
 
-        batch_predicted_labels = tf.math.l2_normalize(self_feats, axis=1)
-        batch_predicted_labels = self.classifier(batch_predicted_labels, training=training)
+        embedded_feats = tf.math.l2_normalize(self_feats, axis=1)
+        batch_predicted_labels = self.classifier(embedded_feats, training=training)
 
-        # extract batch labels    
+        # extract batch labels
         if len(labels.shape) > 1:
             batch_labels = labels[0][:graph_size[0],:]
             for kdx in range(1, nrof_graphs):
