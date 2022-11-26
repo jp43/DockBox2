@@ -122,7 +122,6 @@ class GraphSAGE(tf.keras.models.Model):
                 in_shape = classifier_options['shape'][idx-1]
 
             self.classifier.add(tf.keras.layers.Dense(classifier_options['shape'][idx], input_shape=(in_shape,), use_bias=True, activation=activation))
-            #self.classifier.add(tf.keras.layers.BatchNormalization())
 
         self.classifier.build((input_shape,))
 
@@ -184,7 +183,6 @@ class GraphSAGE(tf.keras.models.Model):
 
         batch_graph_labels = np.zeros(nrof_graphs, dtype=np.int32)
         batch_best_node_labels = np.zeros(nrof_graphs, dtype=np.int32)
-
 
         for kdx in range(nrof_graphs):
             graph_batch_predicted_labels = tf.gather(batch_predicted_labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))

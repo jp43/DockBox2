@@ -17,40 +17,23 @@ class Edger(tf.keras.layers.Layer):
 
     def build(self, input_shape):
 
-        self.sequential = {'dense': [], 'bn':[], 'activation': []}
-        output_shape = input_shape
+        self.seq_layer = tf.keras.Sequential()
 
         for idx in range(self.depth):
             if idx == 0:
                 in_shape = input_shape + 1
             else:
                 in_shape = input_shape
+            self.seq_layer.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=False, activation=self.activation))
 
-            edge_layer = tf.keras.layers.Dense(output_shape, input_shape=(in_shape,), use_bias=True)
-            edge_layer.build((in_shape, ))
-
-            self.sequential['dense'].append(edge_layer)
-
-            bn = tf.keras.layers.BatchNormalization()
-            bn.build((None, output_shape))
-
-            self.sequential['bn'].append(bn)
-            self.sequential['activation'].append(getattr(tf.nn, self.activation))
-
+        self.seq_layer.build((input_shape+1, ))
         super(Edger, self).build(())
 
 
     def call(self, self_feats, neigh_feats, neigh_edge_feats, training=True):
 
-        neigh_feats = tf.concat([neigh_feats, tf.expand_dims(neigh_edge_feats, axis=2)], axis=2)
-
-        for idx in range(self.depth):
-            neigh_feats = self.sequential['dense'][idx](neigh_feats)
-
-            neigh_feats_upd = self.sequential['bn'][idx](tf.reshape(neigh_feats, [-1, int(neigh_feats.shape[-1])]), training=training)
-            neigh_feats = tf.reshape(neigh_feats_upd, list(neigh_feats.shape))
-
-            neigh_feats = self.sequential['activation'][idx](neigh_feats)
+        concat = tf.concat([neigh_feats, tf.expand_dims(neigh_edge_feats, axis=2)], axis=2)
+        neigh_feats = self.seq_layer(concat)
 
         return neigh_feats
 
@@ -90,7 +73,6 @@ class Aggregator(tf.keras.layers.Layer):
 
         elif self.type == 'mean':
             aggregated_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
-
         else:
             sys.exit("Unrecognized aggregator type %s"%self.type)
 

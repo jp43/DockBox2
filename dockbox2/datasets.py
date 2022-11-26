@@ -13,7 +13,7 @@ class GraphDataset(object):
     def __init__(self, filename, edge_options):
 
         with open(filename, "rb") as ff:
-           graphs = pickle.load(ff)
+            graphs = pickle.load(ff)
 
         self.graph_feats = []
         self.graph_labels = []
