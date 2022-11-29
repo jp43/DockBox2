@@ -163,7 +163,7 @@ class ConfigSetup(object):
 
     def pretty_print(self):
 
-        print("******************************************")
+        print("I will use the following options:")
         for attribute in ['classifier', 'minibatch', 'general', 'aggregator', 'edge_options', 'classifier', 'loss']:
             options = getattr(self, attribute)
             options_info = ""
@@ -171,4 +171,3 @@ class ConfigSetup(object):
             for key, value in options.items():
                 options_info += str(key) + ': ' + str(value) + ', '
             print(attribute.upper()+':', options_info[:-2])
-        print("******************************************")

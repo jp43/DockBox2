@@ -1,9 +1,8 @@
 import os
 import sys
 import pickle
-
 import copy
-import shutil
+
 from random import seed, sample
 import numpy as np
 import networkx as nx
@@ -11,25 +10,7 @@ import networkx as nx
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold
 
-# set fraction for test set
-fraction_test = 0.0
-normalize = True
-cross_validation = True
-
-# EITHER set fraction for train set (cross_validation = False)
-fraction_train = 0.5
-fraction_val = 1 - fraction_train - fraction_test
-
-# OR options for cross-validation (cross_validation = True)
-nsplits = 5
-
-cutoff_correct_pose = 2.0
-max_rmsd_interpose = 5.0
-
-downsampling = True
-max_nsamples = 50
-min_rmsd_interpose = 0.1
-
+# load graphs
 nargs = len(sys.argv)
 if nargs == 2:
     pickfile = sys.argv[1]
@@ -39,11 +20,36 @@ else:
 with open(pickfile, "rb") as ff:
    graphs = pickle.load(ff)
 
+# get PBIDS from dictionnary keys
 pdbids = set(graphs.keys())
 pdbids = sorted(list(pdbids))
-
 npdbids = len(pdbids)
 
+# set random seed
+seed(123)
+
+# general options
+normalize = True
+cross_validation = True
+fraction_test = 0.0
+cutoff_correct_pose = 2.0
+
+# options relative to downsampling
+downsampling = True
+max_nsamples = 50
+min_rmsd_interpose = 0.1
+
+# edges with RMSD > max_rmsd_interpose will be discarded
+max_rmsd_interpose = 5.0
+
+# EITHER set fraction for training set (when cross_validation = False)
+fraction_train = 0.5
+fraction_val = 1 - fraction_train - fraction_test
+
+# OR set options for cross-validation (when cross_validation = True)
+nsplits = 5
+
+# number of PDBIDs in test set
 ntest = int(fraction_test*npdbids)
 pdbids_test = sorted(sample(pdbids, ntest))
 
@@ -73,14 +79,10 @@ for pdbid in pdbids:
         data['label'] = label
         labels.append(label)
 
+    # store graph labels for training and validation sets (when cross_validation=True)
     if pdbid not in pdbids_test:
         pdbids_train_val.append(pdbid)
         labels_train_val.append(np.any(np.array(labels)==1).astype(int))
-
-    # remove edges with rmsd greater than max_rmsd_interpose
-    discarded_edges = filter(lambda e: e[2] > max_rmsd_interpose, list(G.edges.data('rmsd')))
-    G.remove_edges_from(list(discarded_edges))
-
 
 if cross_validation:
     skf = StratifiedKFold(n_splits=nsplits)
@@ -104,6 +106,7 @@ else:
 for kdx, datasets in enumerate(datasets_list):
     ratio_correct_incorrect = []
 
+    graph_rmsd = {}
     graphs_copy = copy.deepcopy(graphs) 
     for pdbid in pdbids:
         G = graphs_copy[pdbid]
@@ -132,17 +135,44 @@ for kdx, datasets in enumerate(datasets_list):
             if incorrect_nodes:
                 ratio_correct_incorrect.append(len(correct_nodes)*1./len(incorrect_nodes))
 
+        # saving RMSD before removing edges...
+        graph_rmsd[pdbid] = nx.to_numpy_array(G, weight='rmsd')
+
+        # remove edges with rmsd greater than max_rmsd_interpose
+        discarded_edges = filter(lambda e: e[2] > max_rmsd_interpose, list(G.edges.data('rmsd')))
+        G.remove_edges_from(list(discarded_edges))
+
+        ## remove singletons or pairs
+        #isolated_nodes = []
+        #for subgraph in nx.connected_components(G):
+        #    if len(subgraph) <= 2:
+        #        isolated_nodes.extend(list(subgraph))
+
+        #rmsd_mask = np.ones(rmsd_matrix.shape[0], bool)
+        #for idx, node_idx in enumerate(G.nodes()):
+        #    if node_idx in isolated_nodes:
+        #        rmsd_mask[idx] = 0
+        #G.remove_nodes_from(isolated_nodes)
+
+        #if len(list(G.nodes)) == 0:
+        #    graphs_copy.pop(pdbid)
+        #else:
+        # graph_rmsd[pdbid] = graph_rmsd[pdbid][rmsd_mask,:][:,rmsd_mask]
+
+
     if cross_validation:
         print('split %i: training set: %i elements, validation set: %i elements'%(kdx+1, len(datasets['train']), len(datasets['val'])))
     else:
         print('training set: %i elements, validation set: %i elements'%(len(datasets['train']), len(datasets['val'])))
 
-    print("alpha coefficient needed for balanced set: %.3f"%(1/(1+np.mean(ratio_correct_incorrect))))
+    print("alpha needed for balanced set: %.3f"%(1/(1+np.mean(ratio_correct_incorrect))))
+
     if normalize:
         feats = []
         for pdbid in datasets['train']:
-            for node, data in graphs_copy[pdbid].nodes(data=True):
-                feats.append(data['feature'])
+            if pdbid in graphs_copy:
+                for node, data in graphs_copy[pdbid].nodes(data=True):
+                    feats.append(data['feature'])
     
         feats = np.vstack(feats)
         scaler = StandardScaler()
@@ -153,11 +183,38 @@ for kdx, datasets in enumerate(datasets_list):
             for node, data in G.nodes(data=True):
                 normalized_feats = scaler.transform(data['feature'][np.newaxis,:])
                 G.nodes[node]['feature'] = normalized_feats.squeeze()
-    
+
     for setname, dataset_pdbids in datasets.items():
         dataset_graphs = []
-        for pdbid in dataset_pdbids:
-            dataset_graphs.append(graphs_copy[pdbid])
+        dataset_rmsd = []
+        for jdx, pdbid in enumerate(dataset_pdbids):
+            if pdbid in graphs_copy:
+                G = graphs_copy[pdbid]
+    
+                if jdx == 0:
+                    if cross_validation:
+                        infofile = open('info_'+setname+'_%i.txt'%(kdx+1), 'w')
+                    else:
+                        infofile = open('info_'+setname+'.txt', 'w')
+                    infofile.write("pdbid    nposes    ngraphs    ncorrect    nincorrect    is_correct\n")
+    
+                nposes = len(G)
+                subgraphs = list(nx.connected_components(G))
+                ngraphs = len(subgraphs)
+    
+                ncorrect = 0
+                nincorrect = 0
+                for node, data in G.nodes(data=True):
+                    if data['label'] == 1:
+                        ncorrect += 1
+                    else:
+                        nincorrect += 1
+                infofile.write("%5s    %6i    %7i    %8i    %10i    %10s\n"%(pdbid, nposes, ngraphs, ncorrect, nincorrect, ncorrect>0))
+                dataset_graphs.append(G)
+                dataset_rmsd.append(graph_rmsd[pdbid])
+    
+                if jdx == len(dataset_pdbids)-1:
+                    infofile.close()
 
         if cross_validation:    
             filename = setname + '_%i.pickle'%(kdx+1)
@@ -165,6 +222,9 @@ for kdx, datasets in enumerate(datasets_list):
             filename = setname + '.pickle'
 
         if dataset_pdbids:
+            with open("rmsd_"+filename, 'wb') as ff:
+                pickle.dump(dataset_rmsd, ff)
+
             with open(filename, "wb") as ff:
                 pickle.dump(dataset_graphs, ff)
 

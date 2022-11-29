@@ -110,7 +110,7 @@ def generate_data_loader(dataset, depth, nrof_neigh, num_parallel_calls=1, batch
     data_loader = data_loader.map(**{'num_parallel_calls': num_parallel_calls, 'map_func': lambda x: dataset.sample(x, depth, nrof_neigh)})
     data_loader = data_loader.batch(batch_size=batch_size)
 
-    return data_loader
+    return data_loader, data_slices
 
 
 def sample_neighbors(graph_adj, edge_feats, graph_size, depth, nrof_neigh):

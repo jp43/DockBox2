@@ -74,13 +74,12 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
 
     # load data for training and validation sets
     train = GraphDataset(pickfile_train, config.edge_options)
-    data_loader_train = generate_data_loader(train, depth, nrof_neigh, **config.minibatch)
-    
+    data_loader_train, data_slices_train = generate_data_loader(train, depth, nrof_neigh, **config.minibatch)
+
     valid = GraphDataset(pickfile_val, config.edge_options)
-    data_loader_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch)
+    data_loader_valid, data_slices_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch)
     
     model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, config.loss, config.aggregator, config.classifier, config.edge_options)
-    
     model.build()
 
     if jdx == 0:
@@ -99,22 +98,22 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
            break
     
         for kdx, data_loader in enumerate([data_loader_train, data_loader_valid]):
-            labels, pred_labels, graph_labels, pred_graph_labels, best_node_labels = (None, None, None, None, None)
+            labels, pred_labels, graph_labels, pred_graph_labels, best_node_labels, graph_size = (None, None, None, None, None, None)
      
             for idx_batch, data_batch in enumerate(data_loader):
                 if kdx == 0:
                     # train model from training set
                     with tf.GradientTape() as tape:
-                        batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels = \
+                        batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels, batch_graph_size = \
                             model(*data_batch, training=True)
                         loss = model.call_loss(batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels)
-    
+
                     grads = tape.gradient(loss['total_loss'], model.trainable_weights)
                     optimizer.apply_gradients(zip(grads, model.trainable_weights))
     
                 else:
                     # check predictions for validation set
-                    batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels = \
+                    batch_labels, batch_pred_labels, batch_graph_labels, batch_pred_graph_labels, batch_best_node_labels, batch_graph_size = \
                             model(*data_batch, training=False)
      
                 is_first = True if idx_batch == 0 else False
@@ -125,17 +124,16 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
     
                 pred_graph_labels = append_batch_results(pred_graph_labels, batch_pred_graph_labels, first=is_first)
                 best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first)
-     
-            # call loss
+                graph_size = append_batch_results(graph_size, batch_graph_size, first=is_first)
+
             loss_values = model.call_loss(labels, pred_labels, graph_labels, pred_graph_labels)
-    
-            # call metrics
+
             metrics_values = model.call_metrics(labels, pred_labels)
             graph_metrics_values = model.call_metrics(graph_labels, pred_graph_labels, level='graph')
      
             # compute success rate
             success_rate = model.success_rate(graph_labels, pred_graph_labels, best_node_labels)
-    
+
             # save results in .csv file
             saved_file_mode = "w" if epoch == 0 else "a"
 
@@ -161,5 +159,7 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
                     loc_patience = 0
                 else:
                     loc_patience += 1
-
         time.sleep(1)
+
+    # save predicted labels for validation set
+    save_predicted_labels("preds%s.pickle"%suffix, labels, pred_labels, graph_size, data_slices_valid)

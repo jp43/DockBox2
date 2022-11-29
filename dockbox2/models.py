@@ -4,12 +4,10 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 
 from dockbox2.layers import *
-from dockbox2.pooling import *
 from dockbox2.utils import *
 
 from dockbox2 import loss as db2loss
 from dockbox2 import metrics as mt
-
 
 class GraphSAGE(tf.keras.models.Model):
 
@@ -201,7 +199,7 @@ class GraphSAGE(tf.keras.models.Model):
 
         batch_best_node_labels = tf.convert_to_tensor(batch_best_node_labels[:,np.newaxis])
 
-        return batch_labels, batch_predicted_labels, batch_graph_labels, batch_predicted_graph_labels, batch_best_node_labels
+        return batch_labels, batch_predicted_labels, batch_graph_labels, batch_predicted_graph_labels, batch_best_node_labels, graph_size
 
 
     def call_loss(self, labels, predicted_labels, graph_labels, predicted_graph_labels, regularization=True):
