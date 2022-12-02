@@ -143,7 +143,6 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
                 suffix = ''
 
             results_csv = "results_train%s.csv"%suffix if kdx == 0 else "results_val%s.csv"%suffix
-
             with open(results_csv, saved_file_mode) as csvf:
                 if epoch == 0:
                     csvf.write("epoch," + ','.join(metrics_values.keys())+ ',' + ','.join(graph_metrics_values.keys()) + ",success_rate," \

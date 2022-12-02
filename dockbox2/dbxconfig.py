@@ -164,7 +164,7 @@ class ConfigSetup(object):
     def pretty_print(self):
 
         print("I will use the following options:")
-        for attribute in ['classifier', 'minibatch', 'general', 'aggregator', 'edge_options', 'classifier', 'loss']:
+        for attribute in ['optimizer', 'minibatch', 'general', 'aggregator', 'edge_options', 'classifier', 'loss']:
             options = getattr(self, attribute)
             options_info = ""
 
