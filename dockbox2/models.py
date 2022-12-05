@@ -124,43 +124,55 @@ class GraphSAGE(tf.keras.models.Model):
         self.classifier.build((input_shape,))
 
 
-    def call(self, feats, graph_size, neigh_indices, adj_mask, edge_feats_mask, nneigh, labels, training=True):
+    def call(self, feats, cogs, graph_size, neigh_indices, neigh_adj_values, neigh_rmsd, nneigh, labels, bm_xyz, training=True):
 
         nrof_graphs = len(graph_size) # number of graphs in the minibatch
         graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
 
         # initialize self_feats
         self_feats = feats[0][:graph_size[0]]
+        self_cogs = cogs[0][:graph_size[0]]
+
         for kdx in range(1, nrof_graphs):
              self_feats = tf.concat([self_feats, feats[kdx][:graph_size[kdx]]], axis=0)
+             self_cogs = tf.concat([self_cogs, cogs[kdx][:graph_size[kdx]]], axis=0)
 
         for idx in range(self.depth):
             # construct neigh_feats from self_feat
             for kdx in range(nrof_graphs):
 
                 graph_self_feats = tf.gather(self_feats, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+                graph_self_cogs = tf.gather(self_cogs, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+
                 graph_neigh_feats = tf.gather(graph_self_feats, neigh_indices[kdx][idx][:graph_size[kdx],:])
+                graph_neigh_cogs = tf.gather(graph_self_cogs, neigh_indices[kdx][idx][:graph_size[kdx],:])
 
-                # needed to exclude zero-padded nodes
-                graph_adj_mask = adj_mask[kdx][idx][:graph_size[kdx],:]
-                graph_edge_feats = edge_feats_mask[kdx][idx][:graph_size[kdx],:]
+                graph_neigh_adj_values = neigh_adj_values[kdx][idx][:graph_size[kdx],:]
 
-                graph_neigh_feats = tf.multiply(tf.expand_dims(graph_adj_mask, axis=2), graph_neigh_feats)
-                
+                graph_neigh_rmsd = neigh_rmsd[kdx][idx][:graph_size[kdx],:]
+                graph_neigh_rmsd = tf.multiply(graph_neigh_adj_values, graph_neigh_rmsd)
+
+                graph_neigh_feats = tf.multiply(tf.expand_dims(graph_neigh_adj_values, axis=2), graph_neigh_feats)
+
+                # compute relative COGs (Xj - Xi)
+                graph_neigh_cogs = tf.subtract(graph_neigh_cogs, tf.stack([graph_self_cogs]*tf.shape(graph_neigh_cogs)[1].numpy(), axis=1))
+                graph_neigh_cogs = tf.multiply(tf.expand_dims(graph_neigh_adj_values, axis=2), graph_neigh_cogs)
+
                 if kdx == 0:
                     neigh_feats = graph_neigh_feats
-                    neigh_edge_feats = graph_edge_feats
+                    neigh_cogs = graph_neigh_cogs
+                    layer_neigh_rmsd = graph_neigh_rmsd
                 else:
                     neigh_feats = tf.concat([neigh_feats, graph_neigh_feats], axis=0)
-                    neigh_edge_feats = tf.concat([neigh_edge_feats, graph_edge_feats], axis=0)
+                    neigh_cogs = tf.concat([neigh_cogs, graph_neigh_cogs], axis=0)
+                    layer_neigh_rmsd = tf.concat([layer_neigh_rmsd, graph_neigh_rmsd], axis=0)
 
             nneigh_per_graph = []
             for jdx, nn in enumerate(nneigh[:, idx, :]):
                 nneigh_per_graph.extend(nn[:graph_size[jdx]])
 
             if self.edge_layers:
-                # extract edge features
-                neigh_feats = self.edge_layers[idx](self_feats, neigh_feats, neigh_edge_feats, training=training)
+                neigh_feats = self.edge_layers[idx](self_feats, neigh_feats, neigh_cogs, layer_neigh_rmsd, training=training)
 
             # update node features
             self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, nneigh_per_graph, training=training)

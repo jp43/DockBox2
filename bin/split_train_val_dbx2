@@ -89,7 +89,7 @@ parser.add_argument('--seed',
     type=int,
     help='Random seed')
 
-# update parsers with arguments
+# update parser with arguments
 args = parser.parse_args()
 
 if args.seed is not None:
@@ -102,7 +102,14 @@ else:
 random.seed(seed)
 
 with open(args.pickfile, "rb") as ff:
-   graphs = pickle.load(ff)
+    graphs = pickle.load(ff)
+
+if len(graphs) == 2:
+    graphs, cog_crst = graphs
+    is_bm_location = True
+    print("information about binding site location found!")
+else:
+    is_bm_location = False
 
 # get PDBIDs from dictionnary keys
 pdbids = sorted(list(set(graphs.keys())))
@@ -157,7 +164,7 @@ if args.cross_validation:
 else:
     fraction_val = 1 - args.fraction_train - args.fraction_test
 
-    # select only one train and validation set
+    # select only one training and validation set
     ntrain = int(args.fraction_train*npdbids)
 
     datasets = {'test': pdbids_test}
@@ -234,6 +241,9 @@ for kdx, datasets in enumerate(datasets_list):
         dataset_graphs = []
         dataset_rmsd = []
 
+        if is_bm_location:
+            dataset_bm_xyz = []
+
         for jdx, pdbid in enumerate(dataset_pdbids):
             if pdbid in graphs_copy:
                 G = graphs_copy[pdbid]
@@ -260,6 +270,9 @@ for kdx, datasets in enumerate(datasets_list):
                 if jdx == len(dataset_pdbids)-1:
                     infofile.close()
 
+                if is_bm_location:
+                    dataset_bm_xyz.append(cog_crst[pdbid])
+
         if args.cross_validation:    
             filename = setname + '_%i.pickle'%(kdx+1)
         else:
@@ -270,4 +283,7 @@ for kdx, datasets in enumerate(datasets_list):
                 pickle.dump(dataset_rmsd, ff)
 
             with open(filename, "wb") as ff:
-                pickle.dump(dataset_graphs, ff)
+                if is_bm_location:
+                    pickle.dump([dataset_graphs, dataset_bm_xyz], ff)
+                else:
+                    pickle.dump(dataset_graphs, ff)

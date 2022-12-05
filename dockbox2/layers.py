@@ -7,7 +7,7 @@ class Edger(tf.keras.layers.Layer):
 
     def __init__(self, depth_idx, type, activation, depth):
 
-        name = type.capitalize() + '_extractor_' + str(depth_idx)
+        name = '_'.join(type).capitalize() + '_extractor_' + str(depth_idx)
         super(Edger, self).__init__(name=name)
 
         self.type = type
@@ -17,26 +17,38 @@ class Edger(tf.keras.layers.Layer):
 
     def build(self, input_shape):
 
-        self.seq_layer = tf.keras.Sequential()
+        nfeats = 0
+        self.layer = tf.keras.Sequential()
 
         for idx in range(self.depth):
             if idx == 0:
-                in_shape = input_shape + 1
+                if 'cog' in self.type:
+                    nfeats += 3
+                if 'rmsd' in self.type:
+                    nfeats += 1
+                in_shape = input_shape + nfeats
             else:
                 in_shape = input_shape
-            self.seq_layer.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=False, activation=self.activation))
 
-        self.seq_layer.build((input_shape+1, ))
+            self.layer.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=False, activation=self.activation))
+
+        self.layer.build((input_shape+1, ))
         super(Edger, self).build(())
 
+    def call(self, self_feats, neigh_feats, neigh_cogs, neigh_rmsd, training=True):
 
-    def call(self, self_feats, neigh_feats, neigh_edge_feats, training=True):
+        input_feats = [neigh_feats]
 
-        concat = tf.concat([neigh_feats, tf.expand_dims(neigh_edge_feats, axis=2)], axis=2)
-        neigh_feats = self.seq_layer(concat)
+        if 'cog' in self.type:
+            input_feats.append(neigh_cogs)
+
+        if 'rmsd' in self.type:
+            input_feats.append(tf.expand_dims(neigh_rmsd, axis=2))
+
+        concat = tf.concat(input_feats, axis=2)
+        neigh_feats = self.layer(concat)
 
         return neigh_feats
-
 
 class Aggregator(tf.keras.layers.Layer):
 

@@ -1,5 +1,6 @@
 import os 
 import sys
+
 import re
 import configparser
 import copy
@@ -28,7 +29,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                'use_concat': {'default': True, 'type': bool},
                'activation': {'default': 'relu'}},
 
-'EDGE': {'type': {'default': None, 'among': [None, 'rmsd']},
+'EDGE': {'type': {'default': None, 'among': ['rmsd', 'cog'], 'type': list},
          'depth': {'default': 1, 'type': int},
          'activation': {'default': 'relu'}},
 
@@ -84,26 +85,37 @@ class ConfigSetup(object):
                        option_value = config.get(section, option)
                        options_settings = default_options[section][option]
 
-                       if option_value.lower() == 'none':
+                       if 'none' in option_value.lower():
                            option_value = None
 
                        # converting option
                        elif 'type' in options_settings and options_settings['type'] != 'shape':
-
                            if options_settings['type'] != bool:
                                converter = options_settings['type']
+
+                               if options_settings['type'] == list:
+                                   option_value = map(str.strip, re.sub(r'[()]', '', option_value).split(','))
                                option_value = converter(option_value)
 
                            elif option_value.lower() in ['true', 'yes', '1']:
                                option_value = True
+
                            elif option_value.lower() in ['false', 'no', '0']:
                                option_value = False
                            else:
                                raise ValueError("Option %s in section %s should be boolean!"%(option, section))
 
-                       if 'among' in options_settings and option_value not in options_settings['among']:
-                           known_values = ', '.join(list(map(str, options_settings['among'])))
-                           raise ValueError("Option %s in section %s should be among %s"%(option, section, known_values))
+
+                       if option_value is not None and 'among' in options_settings:
+                           if 'type' in options_settings and options_settings['type'] == list:
+                               for item in option_value:
+                                   if item not in options_settings['among']:
+                                       known_values = ', '.join(list(map(str, options_settings['among'])))
+                                       raise ValueError("Option %s in section %s should be among %s"%(option, section, known_values))
+
+                           elif option_value not in options_settings['among']:
+                               known_values = ', '.join(list(map(str, options_settings['among'])))
+                               raise ValueError("Option %s in section %s should be among %s"%(option, section, known_values))
                        
                        parameters[section][option] = option_value
 

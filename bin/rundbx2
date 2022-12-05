@@ -60,7 +60,7 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
         seed = args.seed
     else:
         seed = random.randint(0, 1e10)
-        print("The random seed is set to %i"%seed)
+        print("random seed is set to %i"%seed)
     set_seed(args.seed)
 
     config = dbxconfig.ConfigSetup(args.config_file)
@@ -89,7 +89,7 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
     optimizer_class = getattr(tf.keras.optimizers, 'Adam')
     optimizer = optimizer_class(learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(**config.optimizer))
     
-    best_loss = 100
+    best_loss = {'total_loss': 100}
     loc_patience = 0
     
     for epoch in range(config.epochs): 
@@ -153,12 +153,15 @@ for jdx, (pickfile_train, pickfile_val) in enumerate(zip(args.pickfiles_t, args.
     
             if kdx == 1:
                 # check if loss value for validation set has not decreased
-                if loss_values['total_loss'] < best_loss:
-                    best_loss = loss_values['total_loss']
+                if loss_values['total_loss'] < best_loss['total_loss']:
+                    best_loss = loss_values
                     loc_patience = 0
+
+                    best_labels = labels
+                    best_pred_labels = pred_labels
                 else:
                     loc_patience += 1
         time.sleep(1)
 
     # save predicted labels for validation set
-    save_predicted_labels("preds%s.pickle"%suffix, labels, pred_labels, graph_size, data_slices_valid)
+    save_predicted_labels("preds%s.pickle"%suffix, best_labels, best_pred_labels, graph_size, data_slices_valid)
