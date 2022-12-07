@@ -148,31 +148,29 @@ class GraphSAGE(tf.keras.models.Model):
                 graph_neigh_cogs = tf.gather(graph_self_cogs, neigh_indices[kdx][idx][:graph_size[kdx],:])
 
                 graph_neigh_adj_values = neigh_adj_values[kdx][idx][:graph_size[kdx],:]
-
-                graph_neigh_rmsd = neigh_rmsd[kdx][idx][:graph_size[kdx],:]
-                graph_neigh_rmsd = tf.multiply(graph_neigh_adj_values, graph_neigh_rmsd)
-
                 graph_neigh_feats = tf.multiply(tf.expand_dims(graph_neigh_adj_values, axis=2), graph_neigh_feats)
 
                 # compute relative COGs (Xj - Xi)
                 graph_neigh_cogs = tf.subtract(graph_neigh_cogs, tf.stack([graph_self_cogs]*tf.shape(graph_neigh_cogs)[1].numpy(), axis=1))
                 graph_neigh_cogs = tf.multiply(tf.expand_dims(graph_neigh_adj_values, axis=2), graph_neigh_cogs)
 
+                graph_neigh_rmsd = neigh_rmsd[kdx][idx][:graph_size[kdx],:]
+
                 if kdx == 0:
                     neigh_feats = graph_neigh_feats
                     neigh_cogs = graph_neigh_cogs
-                    layer_neigh_rmsd = graph_neigh_rmsd
+                    lyr_neigh_rmsd = graph_neigh_rmsd
                 else:
                     neigh_feats = tf.concat([neigh_feats, graph_neigh_feats], axis=0)
                     neigh_cogs = tf.concat([neigh_cogs, graph_neigh_cogs], axis=0)
-                    layer_neigh_rmsd = tf.concat([layer_neigh_rmsd, graph_neigh_rmsd], axis=0)
+                    lyr_neigh_rmsd = tf.concat([lyr_neigh_rmsd, graph_neigh_rmsd], axis=0)
 
             nneigh_per_graph = []
             for jdx, nn in enumerate(nneigh[:, idx, :]):
                 nneigh_per_graph.extend(nn[:graph_size[jdx]])
 
             if self.edge_layers:
-                neigh_feats = self.edge_layers[idx](self_feats, neigh_feats, neigh_cogs, layer_neigh_rmsd, training=training)
+                neigh_feats = self.edge_layers[idx](self_feats, neigh_feats, neigh_cogs, lyr_neigh_rmsd, training=training)
 
             # update node features
             self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, nneigh_per_graph, training=training)
@@ -222,7 +220,7 @@ class GraphSAGE(tf.keras.models.Model):
         if self.loss_g_function is not None:
             loss_g = self.loss_g_function(graph_labels, predicted_graph_labels)
 
-            values['loss_g'] = loss_g 
+            values['loss_g'] = loss_g
             values['total_loss'] += loss_g
 
         if regularization:

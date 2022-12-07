@@ -153,7 +153,7 @@ for pdbid in pdbids:
 
 datasets_list = []
 if args.cross_validation:
-    skf = StratifiedKFold(n_splits=args.nsplits)
+    skf = StratifiedKFold(n_splits=args.nsplits, random_state=seed)
     splits =  skf.split(np.zeros_like(labels_train_val), labels_train_val)
 
     for idxs_train, idxs_val in splits:
@@ -168,7 +168,7 @@ else:
     ntrain = int(args.fraction_train*npdbids)
 
     datasets = {'test': pdbids_test}
-    datasets['train'] = sorted(random.sample(list(set(pdbids) - set(datasets['test'])), ntrain))
+    datasets['train'] = sorted(random.sample(sorted(list(set(pdbids) - set(datasets['test']))), ntrain))
     datasets['val'] = sorted(list(set(pdbids) - set(datasets['train']) - set(datasets['test'])))
 
     datasets_list.append(datasets)

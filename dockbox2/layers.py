@@ -46,7 +46,8 @@ class Edger(tf.keras.layers.Layer):
             input_feats.append(tf.expand_dims(neigh_rmsd, axis=2))
 
         concat = tf.concat(input_feats, axis=2)
-        neigh_feats = self.layer(concat)
+        # F was experiencing some problems if reshaping was not done
+        neigh_feats = tf.reshape(self.layer(tf.reshape(concat, [-1, int(concat.shape[-1])])), list(neigh_feats.shape))
 
         return neigh_feats
 
