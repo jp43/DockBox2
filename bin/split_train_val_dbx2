@@ -68,6 +68,12 @@ parser.add_argument('--maxsamples',
     type=int,
     help='Maximum number of correct and incorrect poses kept per graph (downsampling)')
 
+parser.add_argument('--relative',
+    dest='use_relative',
+    action='store_true',
+    default=False,
+    help='Compute relative scores in addition to absolute ones')
+
 parser.add_argument('--test',
     dest='fraction_test',
     metavar='FLOAT',
@@ -107,7 +113,7 @@ with open(args.pickfile, "rb") as ff:
 if len(graphs) == 2:
     graphs, cog_crst = graphs
     is_bm_location = True
-    print("information about binding site location found!")
+    print("Information about binding site location found...")
 else:
     is_bm_location = False
 
@@ -212,37 +218,48 @@ for kdx, datasets in enumerate(datasets_list):
         G.remove_edges_from(list(discarded_edges))
 
     if args.cross_validation:
-        print('split %i: training set: %i elements, validation set: %i elements'%(kdx+1, len(datasets['train']), len(datasets['val'])))
+        print('Split %i: training set: %i elements, validation set: %i elements'%(kdx+1, len(datasets['train']), len(datasets['val'])))
     else:
-        print('training set: %i elements, validation set: %i elements'%(len(datasets['train']), len(datasets['val'])))
+        print('Training set: %i elements, validation set: %i elements'%(len(datasets['train']), len(datasets['val'])))
 
-    print("alpha coefficient needed for balanced set: %.2f"%(1/(1+np.mean(correctness_ratio))))
+    print("Alpha coefficient needed for balanced set: %.2f"%(1/(1+np.mean(correctness_ratio))))
 
     # normalize data
     if args.normalize:
         feats = []
         for pdbid in datasets['train']:
-            if pdbid in graphs_copy:
-                for node, data in graphs_copy[pdbid].nodes(data=True):
-                    feats.append(data['feature'])
+            for node, data in graphs_copy[pdbid].nodes(data=True):
+                feats.append(data['feature'])
     
         feats = np.vstack(feats)
         scaler = StandardScaler()
         scaler.fit(feats)
-    
+
+    if args.normalize or args.use_relative: 
         for pdbid in graphs_copy:
             G = graphs_copy[pdbid]
+
+            absolute_feats = []
             for node, data in G.nodes(data=True):
-                normalized_feats = scaler.transform(data['feature'][np.newaxis,:])
-                G.nodes[node]['feature'] = normalized_feats.squeeze()
+                absolute_feats.append(data['feature'])
+            absolute_feats = np.array(absolute_feats)
+
+            if args.use_relative:
+                relative_feats = (absolute_feats - np.min(absolute_feats, axis=0))/(np.max(absolute_feats, axis=0) - np.min(absolute_feats, axis=0))
+
+            if args.normalize:
+                absolute_feats = scaler.transform(absolute_feats)
+
+            for idx, (node, data) in enumerate(G.nodes(data=True)):
+                if args.use_relative:
+                    G.nodes[node]['feature'] = np.hstack((absolute_feats[idx,:], relative_feats[idx,:]))
+                else:
+                    G.nodes[node]['feature'] = absolute_feats[idx]
 
     # save graphs and related information
     for setname, dataset_pdbids in datasets.items():
         dataset_graphs = []
         dataset_rmsd = []
-
-        if is_bm_location:
-            dataset_bm_xyz = []
 
         for jdx, pdbid in enumerate(dataset_pdbids):
             if pdbid in graphs_copy:
@@ -250,10 +267,10 @@ for kdx, datasets in enumerate(datasets_list):
     
                 if jdx == 0:
                     if args.cross_validation:
-                        infofile = open('info_'+setname+'_%i.txt'%(kdx+1), 'w')
+                        infofile = open('info_'+setname+'_%i.csv'%(kdx+1), 'w')
                     else:
-                        infofile = open('info_'+setname+'.txt', 'w')
-                    infofile.write("pdbid    nposes    ngraphs    ncorrect    nincorrect\n")
+                        infofile = open('info_'+setname+'.csv', 'w')
+                    infofile.write("pdbid,nposes,ngraphs,ncorrect,nincorrect\n")
     
                 nposes = len(G)
                 subgraphs = list(nx.connected_components(G))
@@ -263,15 +280,12 @@ for kdx, datasets in enumerate(datasets_list):
                 ncorrect = graph_labels.count(1)
                 nincorrect = graph_labels.count(0)
 
-                infofile.write("%5s    %6i    %7i    %8i    %10i\n"%(pdbid, nposes, ngraphs, ncorrect, nincorrect))
+                infofile.write("%s,%i,%i,%i,%i\n"%(pdbid, nposes, ngraphs, ncorrect, nincorrect))
                 dataset_graphs.append(G)
                 dataset_rmsd.append(graph_rmsd[pdbid])
     
                 if jdx == len(dataset_pdbids)-1:
                     infofile.close()
-
-                if is_bm_location:
-                    dataset_bm_xyz.append(cog_crst[pdbid])
 
         if args.cross_validation:    
             filename = setname + '_%i.pickle'%(kdx+1)
@@ -283,7 +297,4 @@ for kdx, datasets in enumerate(datasets_list):
                 pickle.dump(dataset_rmsd, ff)
 
             with open(filename, "wb") as ff:
-                if is_bm_location:
-                    pickle.dump([dataset_graphs, dataset_bm_xyz], ff)
-                else:
-                    pickle.dump(dataset_graphs, ff)
+                pickle.dump(dataset_graphs, ff)

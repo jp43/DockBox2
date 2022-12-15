@@ -13,15 +13,12 @@ class GraphDataset(object):
     def __init__(self, filename, edge_options):
 
         with open(filename, "rb") as ff:
-            graphs, bm_cogs = pickle.load(ff)
+            graphs = pickle.load(ff)
 
         self.feats = []
         self.labels = []
 
         self.cogs = []
-        # relative position to binding mode
-        self.bm_xyz = []
-
         self.adj = []
         self.rmsd = []
 
@@ -37,11 +34,7 @@ class GraphDataset(object):
                 graph_cogs.append(data['cog'])
 
             self.feats.append(np.array(graph_feats))
-
-            graph_cogs = np.array(graph_cogs)
-            self.cogs.append(graph_cogs)
-
-            self.bm_xyz.append(bm_cogs[kdx] - graph_cogs)
+            self.cogs.append(np.array(graph_cogs))
 
             if isinstance(graph_labels[0], int):
                 graph_labels = np.array(graph_labels)
@@ -89,14 +82,12 @@ class GraphDataset(object):
             graph_labels = np.concatenate([self.labels[graph_id], np.zeros((diff, self.nlabels), dtype=np.int32)], axis=0)
 
             graph_cogs = np.concatenate([self.cogs[graph_id], np.zeros((diff, 3), dtype=np.float32)], axis=0)
-            graph_bm_xyz = np.concatenate([self.bm_xyz[graph_id], np.zeros((diff, 3), dtype=np.float32)], axis=0)
 
         else:
             graph_feats = self.feats[graph_id]
             graph_labels = self.labels[graph_id]
 
             graph_cogs = self.cogs[graph_id]
-            graph_bm_xyz = self.bm_xyz[graph_id]
 
         neigh_indices, neigh_adj_values, neigh_rmsd, nneigh = sample_neighbors(adj_matrix, rmsd_matrix, graph_size, depth, nrof_neigh)
 
@@ -111,13 +102,13 @@ class GraphDataset(object):
 
         return np.asarray(graph_feats, np.float32), np.asarray(graph_cogs, np.float32), graph_size, \
                np.asarray(neigh_indices, dtype=np.int32), np.asarray(neigh_adj_values, dtype=np.float32), \
-               np.asarray(neigh_rmsd, dtype=np.float32), np.asarray(nneigh, dtype=np.float32), graph_labels, graph_bm_xyz
+               np.asarray(neigh_rmsd, dtype=np.float32), np.asarray(nneigh, dtype=np.float32), graph_labels
 
 
     def sample(self, graph_id, depth, nrof_neigh):
 
         return tf.py_function(self.__sample, [graph_id, depth, nrof_neigh], [tf.float32, tf.float32, tf.int32,
-                                   tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.float32])
+                                   tf.int32, tf.float32, tf.float32, tf.float32, tf.int32])
 
 
 def generate_data_loader(dataset, depth, nrof_neigh, num_parallel_calls=1, batch_size=1):

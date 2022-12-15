@@ -124,7 +124,7 @@ class GraphSAGE(tf.keras.models.Model):
         self.classifier.build((input_shape,))
 
 
-    def call(self, feats, cogs, graph_size, neigh_indices, neigh_adj_values, neigh_rmsd, nneigh, labels, bm_xyz, training=True):
+    def call(self, feats, cogs, graph_size, neigh_indices, neigh_adj_values, neigh_rmsd, nneigh, labels, training=True):
 
         nrof_graphs = len(graph_size) # number of graphs in the minibatch
         graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
@@ -264,7 +264,7 @@ class GraphSAGE(tf.keras.models.Model):
         pred_graph_labels_i = tf.expand_dims(pred_graph_labels_i, axis=1)
 
         correct_preds = tf.logical_and(tf.equal(graph_labels, pred_graph_labels_i), \
-                       tf.logical_or(tf.equal(graph_labels, 0), tf.logical_and(tf.equal(graph_labels, 1), tf.equal(pred_graph_labels_i, best_node_labels))))
+                       tf.logical_or(tf.equal(graph_labels, 0), tf.equal(best_node_labels, 1)))
 
         nrof_correct_preds = tf.get_static_value(tf.math.count_nonzero(correct_preds))
 
