@@ -25,8 +25,11 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
-               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean']},
+               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'gat']},
                'use_concat': {'default': True, 'type': bool},
+               'activation': {'default': 'relu'}},
+
+'GAT': {'shape': {'default': None, 'type': 'shape'},
                'activation': {'default': 'relu'}},
 
 'EDGE': {'type': {'default': None, 'among': ['rmsd', 'cog'], 'type': list},
@@ -169,6 +172,7 @@ class ConfigSetup(object):
         self.general = parameters['GENERAL']
         self.optimizer = parameters['OPTIMIZER']
         self.aggregator = parameters['AGGREGATOR']
+        self.gat = parameters['GAT']
 
         self.classifier = parameters['CLASSIFIER']
         self.edge_options = parameters['EDGE']
@@ -176,7 +180,7 @@ class ConfigSetup(object):
     def pretty_print(self):
 
         print("I will use the following options:")
-        for attribute in ['optimizer', 'minibatch', 'general', 'aggregator', 'edge_options', 'classifier', 'loss']:
+        for attribute in ['optimizer', 'minibatch', 'general', 'aggregator', 'gat', 'edge_options', 'classifier', 'loss']:
             options = getattr(self, attribute)
             options_info = ""
 

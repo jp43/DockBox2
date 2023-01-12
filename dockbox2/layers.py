@@ -51,9 +51,10 @@ class Edger(tf.keras.layers.Layer):
 
         return neigh_feats
 
+
 class Aggregator(tf.keras.layers.Layer):
 
-    def __init__(self, depth_idx, type, activation, use_concat):
+    def __init__(self, depth_idx, type, activation, use_concat, gat_options):
 
         name = type.capitalize() + '_agg_' + str(depth_idx) 
         super(Aggregator, self).__init__(name=name)
@@ -63,7 +64,13 @@ class Aggregator(tf.keras.layers.Layer):
         self.use_concat = use_concat
         self.activation = activation
 
-    def build(self, input_shape, output_shape):
+        if self.type == 'gat':
+            self.gat_layer = GATLayer(gat_options['activation'])
+
+    def build(self, input_shape, output_shape, gat_shape=None):
+
+        if self.type == 'gat':
+            self.gat_layer.build(input_shape, gat_shape)
 
         self.self_layer = tf.keras.layers.Dense(output_shape, input_shape=(input_shape,), use_bias=True)
         self.self_layer.build((input_shape, ))
@@ -86,6 +93,10 @@ class Aggregator(tf.keras.layers.Layer):
 
         elif self.type == 'mean':
             aggregated_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
+
+        elif self.type == 'gat':
+            attention_weights = self.gat_layer(self_feats, neigh_feats, training=training)
+            aggregated_feats = tf.reduce_sum(tf.multiply(attention_weights, neigh_feats), axis=1)
         else:
             sys.exit("Unrecognized aggregator type %s"%self.type)
 
@@ -101,4 +112,47 @@ class Aggregator(tf.keras.layers.Layer):
         self_feats = self.activation_fn(self_feats)
 
         return self_feats
+
+
+class GATLayer(tf.keras.layers.Layer):
+
+    def __init__(self, activation):
+
+        super(GATLayer, self).__init__()
+
+        self.activation = getattr(tf.nn, activation)
+
+
+    def build(self, input_shape, attention_shape):
+
+        self.shared_layer = tf.keras.layers.Dense(attention_shape, input_shape=(input_shape,), use_bias=False)
+        self.shared_layer.build((input_shape,))
+
+        self.bn = tf.keras.layers.BatchNormalization()
+        self.bn.build((None, attention_shape))
+
+        self.output_gat_layer = tf.keras.layers.Dense(1, input_shape=(2*attention_shape,))
+        self.output_gat_layer.build((2*attention_shape,))
+
+        super(GATLayer, self).build(())
+
+
+    def call(self, self_feats, neigh_feats, training=True):
+
+        self_feats_shared = self.shared_layer(self_feats)
+        self_feats_shared = self.bn(self_feats_shared, training=training)
+
+        neigh_feats_shared = self.shared_layer(neigh_feats)
+        neigh_feats_upd = self.bn(tf.reshape(neigh_feats_shared, [-1, int(neigh_feats_shared.shape[-1])]), training=training)
+        neigh_feats_shared = tf.reshape(neigh_feats_upd, list(neigh_feats_shared.shape))
+
+        concat = tf.concat([tf.stack([self_feats_shared]*tf.shape(neigh_feats_shared)[1].numpy(), axis=1), neigh_feats_shared], axis=2)
+
+        weights = self.output_gat_layer(concat)
+        weights = self.activation(weights)
+
+        weights = tf.nn.softmax(tf.squeeze(weights, axis=2))
+        weights = tf.expand_dims(weights, axis=2)
+
+        return weights
 

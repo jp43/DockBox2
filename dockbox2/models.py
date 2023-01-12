@@ -11,7 +11,8 @@ from dockbox2 import metrics as mt
 
 class GraphSAGE(tf.keras.models.Model):
 
-    def __init__(self, in_shape, out_shape, depth, nrof_neigh, loss_options, aggregator_options, classifier_options, edge_options):
+    def __init__(self, in_shape, out_shape, depth, nrof_neigh, loss_options, aggregator_options, classifier_options, \
+        edge_options, attention_options=None):
 
         super(GraphSAGE, self).__init__()
 
@@ -22,6 +23,7 @@ class GraphSAGE(tf.keras.models.Model):
         self.nrof_neigh = nrof_neigh
 
         self.aggregator_options = aggregator_options
+        self.attention_options = attention_options
 
         self.classifier_options = classifier_options
         self.edge_options = edge_options
@@ -83,7 +85,7 @@ class GraphSAGE(tf.keras.models.Model):
         for idx in range(self.depth):
             if edge_type is not None:
                 edge_layer = Edger(idx, edge_type, edge_activation, **edge_options)
-            aggregator_layer = Aggregator(idx, aggregator_type, aggregator_activation, use_concat)
+            aggregator_layer = Aggregator(idx, aggregator_type, aggregator_activation, use_concat, gat_options=self.attention_options)
 
             if idx == 0:
                 in_shape = self.in_shape
@@ -94,7 +96,15 @@ class GraphSAGE(tf.keras.models.Model):
                 edge_layer.build(in_shape)
                 self.edge_layers.append(edge_layer)
 
-            aggregator_layer.build(in_shape, aggregator_shape[idx])
+            if aggregator_type == 'gat':
+                if self.attention_options['shape'] is None:
+                    gat_shape = in_shape
+                else:
+                    gat_shape = self.attention_options['shape'][idx]
+            else:
+                gat_shape = None
+
+            aggregator_layer.build(in_shape, aggregator_shape[idx], gat_shape=gat_shape)
             self.aggregator_layers.append(aggregator_layer)
 
         self.build_classifier((use_concat+1)*aggregator_shape[-1])
@@ -159,18 +169,18 @@ class GraphSAGE(tf.keras.models.Model):
                 if kdx == 0:
                     neigh_feats = graph_neigh_feats
                     neigh_cogs = graph_neigh_cogs
-                    lyr_neigh_rmsd = graph_neigh_rmsd
+                    layer_neigh_rmsd = graph_neigh_rmsd
                 else:
                     neigh_feats = tf.concat([neigh_feats, graph_neigh_feats], axis=0)
                     neigh_cogs = tf.concat([neigh_cogs, graph_neigh_cogs], axis=0)
-                    lyr_neigh_rmsd = tf.concat([lyr_neigh_rmsd, graph_neigh_rmsd], axis=0)
+                    layer_neigh_rmsd = tf.concat([layer_neigh_rmsd, graph_neigh_rmsd], axis=0)
 
             nneigh_per_graph = []
             for jdx, nn in enumerate(nneigh[:, idx, :]):
                 nneigh_per_graph.extend(nn[:graph_size[jdx]])
 
             if self.edge_layers:
-                neigh_feats = self.edge_layers[idx](self_feats, neigh_feats, neigh_cogs, lyr_neigh_rmsd, training=training)
+                neigh_feats = self.edge_layers[idx](self_feats, neigh_feats, neigh_cogs, layer_neigh_rmsd, training=training)
 
             # update node features
             self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, nneigh_per_graph, training=training)

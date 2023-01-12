@@ -159,7 +159,7 @@ for pdbid in pdbids:
 
 datasets_list = []
 if args.cross_validation:
-    skf = StratifiedKFold(n_splits=args.nsplits, random_state=seed)
+    skf = StratifiedKFold(n_splits=args.nsplits, random_state=seed, shuffle=True)
     splits =  skf.split(np.zeros_like(labels_train_val), labels_train_val)
 
     for idxs_train, idxs_val in splits:
