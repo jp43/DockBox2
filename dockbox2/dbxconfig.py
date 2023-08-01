@@ -22,6 +22,8 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
           'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossentropy')},
           'weight': {'default': 1.0, 'type': float}},
 
+'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError']}}, # loss function for graph_level task (pKd)
+
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
@@ -32,17 +34,19 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'GAT': {'shape': {'default': None, 'type': 'shape'},
                'activation': {'default': 'relu'}},
 
-'EDGE': {'type': {'default': None, 'among': ['rmsd', 'cog'], 'type': list},
+'EDGE': {'type': {'default': None, 'among': ['rmsd'], 'type': list},
          'depth': {'default': 1, 'type': int},
          'activation': {'default': 'relu'}},
 
 'CLASSIFIER': {'shape': {'default': '1', 'type': 'shape'},
                'activation_h': {'default': 'relu'},
                'activation': {'default': 'sigmoid'}},
-}
 
-default_options['LOSSG'] = copy.deepcopy(default_options['LOSSN'])
-default_options['LOSSG']['weight']['default'] = .0
+'READOUT': {'shape': {'default': '1', 'type': 'shape'},
+           'type': {'default': 'meanmax', 'among': ['meanmax']},
+           'activation_h': {'default': 'relu'},
+           'activation': {'default': 'linear'}} 
+}
 
 class ConfigSetup(object):
 
@@ -175,15 +179,32 @@ class ConfigSetup(object):
         self.gat = parameters['GAT']
 
         self.classifier = parameters['CLASSIFIER']
-        self.edge_options = parameters['EDGE']
+        self.edge = parameters['EDGE']
+        self.readout = parameters['READOUT']
 
-    def pretty_print(self):
+    def pretty_print(self, task_level='node'):
 
-        print("I will use the following options:")
-        for attribute in ['optimizer', 'minibatch', 'general', 'aggregator', 'gat', 'edge_options', 'classifier', 'loss']:
+        attributes = ['optimizer', 'minibatch', 'general', 'aggregator', 'edge', 'loss']
+
+        if self.aggregator['type'] == 'gat':
+            attributes.append('gat')
+
+        if task_level == 'graph':
+            loss_types = ['loss_g', 'loss_reg']
+            attributes.append('readout')
+
+        elif task_level == 'node':
+            loss_types = ['loss_n', 'loss_reg']
+            attributes.append('classifier')
+        else:
+            raise ValueError("Task level %s not recognized! Should be node or graph")
+
+        print("The following options will be used:")
+        for attribute in attributes:
             options = getattr(self, attribute)
             options_info = ""
 
             for key, value in options.items():
-                options_info += str(key) + ': ' + str(value) + ', '
+                if attribute != 'loss' or key in loss_types:
+                    options_info += str(key) + ': ' + str(value) + ', '
             print(attribute.upper()+':', options_info[:-2])

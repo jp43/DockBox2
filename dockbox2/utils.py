@@ -2,6 +2,7 @@ import random
 import pickle
 import tensorflow as tf
 import numpy as np
+import h5py
 
 abbreviation = {"precision": "Pr", "recall": "Rc", "f1_score": "F1",}
 

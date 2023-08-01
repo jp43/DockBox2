@@ -1,6 +1,7 @@
 import sys
 
 import math
+import numpy as np
 import tensorflow as tf
 
 class Edger(tf.keras.layers.Layer):
@@ -18,36 +19,32 @@ class Edger(tf.keras.layers.Layer):
     def build(self, input_shape):
 
         nfeats = 0
-        self.layer = tf.keras.Sequential()
+        self.dense_layer = tf.keras.Sequential()
 
         for idx in range(self.depth):
             if idx == 0:
-                if 'cog' in self.type:
-                    nfeats += 3
                 if 'rmsd' in self.type:
                     nfeats += 1
                 in_shape = input_shape + nfeats
             else:
                 in_shape = input_shape
 
-            self.layer.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=False, activation=self.activation))
+            self.dense_layer.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=False, activation=self.activation))
 
-        self.layer.build((input_shape+1, ))
+        self.dense_layer.build((input_shape+1, ))
+
         super(Edger, self).build(())
 
-    def call(self, self_feats, neigh_feats, neigh_cogs, neigh_rmsd, training=True):
+    def call(self, self_feats, neigh_feats, neigh_rmsd, training=True):
 
         input_feats = [neigh_feats]
-
-        if 'cog' in self.type:
-            input_feats.append(neigh_cogs)
 
         if 'rmsd' in self.type:
             input_feats.append(tf.expand_dims(neigh_rmsd, axis=2))
 
         concat = tf.concat(input_feats, axis=2)
         # F was experiencing some problems if reshaping was not done
-        neigh_feats = tf.reshape(self.layer(tf.reshape(concat, [-1, int(concat.shape[-1])])), list(neigh_feats.shape))
+        neigh_feats = tf.reshape(self.dense_layer(tf.reshape(concat, [-1, int(concat.shape[-1])])), list(neigh_feats.shape))
 
         return neigh_feats
 
@@ -112,6 +109,60 @@ class Aggregator(tf.keras.layers.Layer):
         self_feats = self.activation_fn(self_feats)
 
         return self_feats
+
+
+class GraphPooler(tf.keras.layers.Layer):
+
+    def __init__(self, name, type, shape, activation, activation_h):
+
+        super(GraphPooler, self).__init__(name=name)
+
+        self.type = type
+        self.shape = shape
+
+        self.activation = activation
+        self.activation_h = activation_h
+
+    def build(self, input_shape):
+
+        self.dense_layer = tf.keras.Sequential()
+        depth = len(self.shape)
+
+        for idx in range(depth):
+            if idx + 1 == depth:
+                activation = self.activation
+            else:
+                activation = self.activation_h
+
+            if idx == 0:
+                in_shape = input_shape
+            else:
+                in_shape = self.shape[idx-1]
+
+            self.dense_layer.add(tf.keras.layers.Dense(self.shape[idx], input_shape=(in_shape,), use_bias=True, activation=activation))
+
+        self.dense_layer.build((input_shape,))
+        super(GraphPooler, self).build(())
+
+    def call(self, self_feats, graph_size, training=True):
+
+        if self.type == 'meanmax':
+           graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
+           nrof_graphs = len(graph_size) # number of graphs in the minibatch
+
+           for kdx in range(nrof_graphs): 
+               graph_self_feats = tf.gather(self_feats, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+
+               mean_feats = tf.expand_dims(tf.reduce_mean(graph_self_feats, axis=0), 0)
+               max_feats = tf.expand_dims(tf.reduce_max(graph_self_feats, axis=0), 0)
+
+               if kdx == 0:
+                   pooled_feats = tf.concat([mean_feats, max_feats], axis=1)
+               else:
+                   pooled_feats = tf.concat([pooled_feats, tf.concat([mean_feats, max_feats], axis=1)], axis=0)
+
+        pooled_feats = self.dense_layer(pooled_feats, training=training)
+        return pooled_feats
 
 
 class GATLayer(tf.keras.layers.Layer):
