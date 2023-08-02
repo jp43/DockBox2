@@ -29,6 +29,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
                'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'gat']},
                'use_concat': {'default': True, 'type': bool},
+               'use_bias': {'default': True, 'type': bool},
                'activation': {'default': 'relu'}},
 
 'GAT': {'shape': {'default': None, 'type': 'shape'},
@@ -36,6 +37,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 
 'EDGE': {'type': {'default': None, 'among': ['rmsd'], 'type': list},
          'depth': {'default': 1, 'type': int},
+         'use_bias': {'default': False, 'type': bool},
          'activation': {'default': 'relu'}},
 
 'CLASSIFIER': {'shape': {'default': '1', 'type': 'shape'},
@@ -44,6 +46,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 
 'READOUT': {'shape': {'default': '1', 'type': 'shape'},
            'type': {'default': 'meanmax', 'among': ['meanmax']},
+           'use_bias': {'default': True, 'type': bool},
            'activation_h': {'default': 'relu'},
            'activation': {'default': 'linear'}} 
 }

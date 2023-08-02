@@ -6,13 +6,14 @@ import tensorflow as tf
 
 class Edger(tf.keras.layers.Layer):
 
-    def __init__(self, depth_idx, type, activation, depth):
+    def __init__(self, depth_idx, type, activation, depth, use_bias=False):
 
         name = '_'.join(type).capitalize() + '_extractor_' + str(depth_idx)
         super(Edger, self).__init__(name=name)
 
         self.type = type
         self.depth = depth
+        self.use_bias = use_bias
 
         self.activation = activation
 
@@ -29,7 +30,7 @@ class Edger(tf.keras.layers.Layer):
             else:
                 in_shape = input_shape
 
-            self.dense_layer.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=False, activation=self.activation))
+            self.dense_layer.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=self.use_bias, activation=self.activation))
 
         self.dense_layer.build((input_shape+1, ))
 
@@ -51,7 +52,7 @@ class Edger(tf.keras.layers.Layer):
 
 class Aggregator(tf.keras.layers.Layer):
 
-    def __init__(self, depth_idx, type, activation, use_concat, gat_options):
+    def __init__(self, depth_idx, type, activation, use_concat, gat_options, use_bias=True):
 
         name = type.capitalize() + '_agg_' + str(depth_idx) 
         super(Aggregator, self).__init__(name=name)
@@ -60,6 +61,7 @@ class Aggregator(tf.keras.layers.Layer):
 
         self.use_concat = use_concat
         self.activation = activation
+        self.use_bias = use_bias
 
         if self.type == 'gat':
             self.gat_layer = GATLayer(gat_options['activation'])
@@ -69,10 +71,10 @@ class Aggregator(tf.keras.layers.Layer):
         if self.type == 'gat':
             self.gat_layer.build(input_shape, gat_shape)
 
-        self.self_layer = tf.keras.layers.Dense(output_shape, input_shape=(input_shape,), use_bias=True)
+        self.self_layer = tf.keras.layers.Dense(output_shape, input_shape=(input_shape,), use_bias=self.use_bias)
         self.self_layer.build((input_shape, ))
 
-        self.neigh_layer = tf.keras.layers.Dense(output_shape, input_shape=(input_shape,), use_bias=True)
+        self.neigh_layer = tf.keras.layers.Dense(output_shape, input_shape=(input_shape,), use_bias=self.use_bias)
         self.neigh_layer.build((input_shape, ))
 
         self.bn = tf.keras.layers.BatchNormalization()
@@ -113,7 +115,7 @@ class Aggregator(tf.keras.layers.Layer):
 
 class GraphPooler(tf.keras.layers.Layer):
 
-    def __init__(self, name, type, shape, activation, activation_h):
+    def __init__(self, name, type, shape, activation, activation_h, use_bias=True):
 
         super(GraphPooler, self).__init__(name=name)
 
@@ -122,6 +124,7 @@ class GraphPooler(tf.keras.layers.Layer):
 
         self.activation = activation
         self.activation_h = activation_h
+        self.use_bias = use_bias
 
     def build(self, input_shape):
 
@@ -139,7 +142,7 @@ class GraphPooler(tf.keras.layers.Layer):
             else:
                 in_shape = self.shape[idx-1]
 
-            self.dense_layer.add(tf.keras.layers.Dense(self.shape[idx], input_shape=(in_shape,), use_bias=True, activation=activation))
+            self.dense_layer.add(tf.keras.layers.Dense(self.shape[idx], input_shape=(in_shape,), use_bias=self.use_bias, activation=activation))
 
         self.dense_layer.build((input_shape,))
         super(GraphPooler, self).build(())
