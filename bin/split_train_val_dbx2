@@ -13,6 +13,7 @@ import networkx as nx
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold
+from dockbox2.dbxconfig import known_scoring_functions
 
 parser = argparse.ArgumentParser(description="split train and validation sets for training with DockBox2")
 
@@ -38,7 +39,7 @@ parser.add_argument('--normalize',
     dest='normalize',
     action="store_true",
     default=False,
-    help='normalize data')
+    help='normalize known scoring functions')
 
 parser.add_argument('--nsplits',
     dest='nsplits',
@@ -46,13 +47,6 @@ parser.add_argument('--nsplits',
     default=5,
     type=int,
     help='number of splits used for cross-validation')
-
-parser.add_argument('--maxrmsd',
-    dest='max_rmsd_interpose',
-    metavar='FLOAT',
-    default=5.0,
-    type=float,
-    help='keep only edges with rmsd less than cutoff')
 
 parser.add_argument('--maxgraphs',
     dest='max_ngraphs',
@@ -118,6 +112,21 @@ if all([isinstance(graphs[pdbid], list) and len(graphs[pdbid])==2 for pdbid in p
 else:
     pkd = None
 
+is_first = True
+# check and extract feature names
+for pdbid in pdbids: 
+    G = graphs[pdbid]
+    for node, data in G.nodes(data=True):
+        if is_first:
+            data_names = data.keys()
+            feature_names = sorted([ft for ft in data if any(ft.startswith(sf) for sf in known_scoring_functions)])
+            is_first = False
+        else:
+            for key in data:
+                if key not in data_names:
+                    print("Provided graphs are not consistent, %s data not found in every node"%key)  
+                    sys.exit(1)
+
 # check restrictions on test set
 if is_float(args.value_test):
     fraction_test = float(args.value_test*npdbids)
@@ -144,7 +153,7 @@ for pdbid in pdbids:
             data['label'] = 0
         node_labels.append(data['label'])
 
-    if pdbid not in pdbids_test:
+    if args.cross_validation and pdbid not in pdbids_test:
         pdbids_train_val.append(pdbid)
         if pkd is not None:
             # if pkd are provided, use them to construct training and validations sets
@@ -223,10 +232,6 @@ for kdx, datasets in enumerate(datasets_list):
             if false_nodes:
                 correctness_ratio.append(len(true_nodes)*1./len(false_nodes))
 
-        # remove edges with rmsd greater than max_rmsd_interpose
-        discarded_edges = filter(lambda e: e[2] > args.max_rmsd_interpose, list(G.edges.data('rmsd')))
-        G.remove_edges_from(list(discarded_edges))
-
     if args.cross_validation:
         print('split %i: training set: %i elements, validation set: %i elements'%(kdx+1, len(datasets['train']), len(datasets['val'])))
     else:
@@ -235,28 +240,37 @@ for kdx, datasets in enumerate(datasets_list):
 
     # normalize data
     if args.normalize:
-        feats = []
+        feats = {ft: [] for ft in feature_names}
         for pdbid in datasets['train']:
-            for node, data in graphs_copy[pdbid].nodes(data=True):
-                feats.append(data['feature'])
-    
-        feats = np.vstack(feats)
-        scaler = StandardScaler()
-        scaler.fit(feats)
-        
+            G = graphs_copy[pdbid]
+
+            for node, data in G.nodes(data=True):
+                for ft, value in data.items():
+                    if ft in feature_names:
+                        feats[ft].append(value)
+ 
         if args.cross_validation:
             scaler_file = 'scaler_%i.pkl'%(kdx+1)
         else:
             scaler_file = 'scaler.pkl'
 
+        scalers = {}
+        for ft in feature_names:
+            scaler = StandardScaler() 
+            scaler.fit(np.array(feats[ft]).reshape(-1, 1))
+            scalers[ft] = scaler
+
         with open(scaler_file, "wb") as ff:
-            pickle.dump(scaler, ff)
+            pickle.dump(scalers, ff)
 
         for pdbid in graphs_copy:
             G = graphs_copy[pdbid]
+
             for node, data in G.nodes(data=True):
-                normalized_feats = scaler.transform(data['feature'][np.newaxis,:])
-                G.nodes[node]['feature'] = normalized_feats.squeeze()
+                for ft in feature_names:
+                    ft_array = np.array([[data[ft]]])
+                    normalized_feat = scalers[ft].transform(ft_array)
+                    G.nodes[node][ft] = normalized_feat[0][0]
 
     # save graphs and related information
     for setname, dataset_pdbids in datasets.items():

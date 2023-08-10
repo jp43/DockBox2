@@ -1,9 +1,11 @@
 import random
 import pickle
 import tensorflow as tf
+
 import numpy as np
 import h5py
 
+known_scoring_functions = ['autodock', 'dock', 'dsx', 'gnina', 'moe', 'vina']
 abbreviation = {"precision": "Pr", "recall": "Rc", "f1_score": "F1",}
 
 def append_batch_results(values, batch_values, first=True):

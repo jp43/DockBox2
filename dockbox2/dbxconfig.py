@@ -5,9 +5,15 @@ import re
 import configparser
 import copy
 
+default_features = ['instance', 'score']
+known_scoring_functions = ['autodock', 'dock', 'dsx', 'gnina', 'moe', 'vina']
+
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
                                'nrof_neigh': {'default': 25, 'type': int}},
+
+'NODE': {'rmsd_cutoff': {'default': 7.0, 'type': float},
+         'features': {'required': True, 'type': 'features'}}, 
 
 'MINIBATCH': {'batch_size': {'default': 2, 'type': int},
               'num_parallel_calls': {'default': 1, 'type': int}},
@@ -50,6 +56,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
            'activation_h': {'default': 'relu'},
            'activation': {'default': 'linear'}} 
 }
+
 
 class ConfigSetup(object):
 
@@ -99,7 +106,7 @@ class ConfigSetup(object):
                            option_value = None
 
                        # converting option
-                       elif 'type' in options_settings and options_settings['type'] != 'shape':
+                       elif 'type' in options_settings and options_settings['type'] not in ['shape', 'features']:
                            if options_settings['type'] != bool:
                                converter = options_settings['type']
 
@@ -114,7 +121,6 @@ class ConfigSetup(object):
                                option_value = False
                            else:
                                raise ValueError("Option %s in section %s should be boolean!"%(option, section))
-
 
                        if option_value is not None and 'among' in options_settings:
                            if 'type' in options_settings and options_settings['type'] == list:
@@ -143,18 +149,30 @@ class ConfigSetup(object):
         for section in default_options:
             for option, properties in default_options[section].items():
 
-                if 'type' in properties and default_options[section][option]['type'] == 'shape':
-                    value = parameters[section][option]
-                    if value is not None:
-                        value = list(map(int, re.sub(r'[()]', '', value).split(',')))
+                if 'type' in properties:
+                    if default_options[section][option]['type'] == 'shape':
+                        value = parameters[section][option]
+                        if value is not None:
+                            value = list(map(int, re.sub(r'[()]', '', value).split(',')))
 
-                        if section == 'AGGREGATOR':
-                            depth = parameters['GENERAL']['depth']
-                            if len(value) == 1:
-                                value = value*depth
-                            elif len(value) != depth:
-                                raise ValueError("Aggregator shapes should match depth option in GENERAL section!")
-                        parameters[section][option] = value
+                            if section == 'AGGREGATOR':
+                                depth = parameters['GENERAL']['depth']
+                                if len(value) == 1:
+                                    value = value*depth
+                                elif len(value) != depth:
+                                    raise ValueError("Aggregator shapes should match depth option in GENERAL section!")
+                            parameters[section][option] = value
+
+                    elif default_options[section][option]['type'] == 'features':
+                        value = parameters[section][option].strip()
+                        feats = [sf.strip() for sf in value.split(',')]
+                        new_feats = []
+                        for ft in feats:
+                            if ft in default_features or any([ft.startswith(sf) for sf in known_scoring_functions]):
+                                new_feats.append(ft)
+                            else:
+                                raise ValueError("feature %s not recognized!"%ft)
+                        parameters[section][option] = sorted(new_feats)
 
         # remove unrelated options
         for section in default_options:
@@ -170,6 +188,7 @@ class ConfigSetup(object):
         self.depth = parameters['GENERAL']['depth']
 
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
+        self.node = parameters['NODE']
 
         self.minibatch = parameters['MINIBATCH']
         self.loss = {'loss_n': parameters['LOSSN'],
@@ -187,7 +206,7 @@ class ConfigSetup(object):
 
     def pretty_print(self, task_level='node'):
 
-        attributes = ['optimizer', 'minibatch', 'general', 'aggregator', 'edge', 'loss']
+        attributes = ['optimizer', 'minibatch', 'general', 'node', 'aggregator', 'edge', 'loss']
 
         if self.aggregator['type'] == 'gat':
             attributes.append('gat')

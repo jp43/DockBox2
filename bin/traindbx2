@@ -93,10 +93,10 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
         config.pretty_print(task_level=args.task_level)
 
     # load data for training and validation sets
-    train = GraphDataset(pkfile_train, config.edge, task_level=args.task_level)
+    train = GraphDataset(pkfile_train, config.node, config.edge, task_level=args.task_level)
     data_loader_train, data_slices_train = generate_data_loader(train, depth, nrof_neigh, **config.minibatch, randomize=True)
 
-    valid = GraphDataset(pkfile_val, config.edge, task_level=args.task_level)
+    valid = GraphDataset(pkfile_val, config.node, config.edge, task_level=args.task_level)
     data_loader_valid, data_slices_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch, randomize=True)
 
     model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, config.loss, config.aggregator, \

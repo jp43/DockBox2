@@ -10,10 +10,13 @@ import tensorflow as tf
 
 class GraphDataset(object):
 
-    def __init__(self, filename, edge_options, task_level='node', testing=False):
+    def __init__(self, filename, node_options, edge_options, task_level='node', testing=False):
 
         self.testing = testing
         self.task_level = task_level
+
+        feat_names = node_options['features']
+        rmsd_cutoff = node_options['rmsd_cutoff']
 
         with open(filename, "rb") as ff:
             graphs = pickle.load(ff)
@@ -29,6 +32,16 @@ class GraphDataset(object):
             if isinstance(graphs, nx.Graph): 
                 graphs = [graphs]
 
+        if rmsd_cutoff is not None:
+            new_graphs = []
+            # remove edges with rmsd greater than cutoff
+            for G in graphs:
+                discarded_edges = filter(lambda e: e[2] > rmsd_cutoff, list(G.edges.data('rmsd')))
+                G.remove_edges_from(list(discarded_edges))
+
+                new_graphs.append(G)
+            graphs = list(new_graphs)
+ 
         self.feats = []
         self.adj = []
         self.rmsd = []
@@ -41,7 +54,7 @@ class GraphDataset(object):
 
             # load features and labels
             for node, data in graph.nodes(data=True):
-                graph_feats.append(data['feature'])
+                graph_feats.append([data[ft] for ft in feat_names])
 
                 if 'label' not in data and task_level == 'node' and not testing:
                     raise ValueError("node labels (pose correctness) not found. Required for node-level task prediction!")
