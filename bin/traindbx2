@@ -100,7 +100,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     data_loader_valid, data_slices_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch, randomize=True)
 
     model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, config.loss, config.aggregator, \
-                config.classifier, config.readout, config.edge, attention_options=config.gat, task_level=args.task_level)
+                config.classifier, config.readout, config.node, config.edge, attention_options=config.gat, task_level=args.task_level)
     model.build()
 
     if jdx == 0:
@@ -156,6 +156,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
 
             elif args.task_level == 'graph':
                 pearson_coefficient = model.pearson(labels, pred_labels)
+                r_squared_value = model.r_squared_value(labels, pred_labels)
 
             # save results in .csv file
             saved_file_mode = "w" if epoch == 0 else "a"
@@ -170,14 +171,14 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
                     if args.task_level == 'node':
                         csvf.write("epoch,success_rate," + ','.join(loss_values.keys())+"\n")
                     elif args.task_level == 'graph':
-                        csvf.write("epoch,pearson," + ','.join(loss_values.keys())+"\n")
+                        csvf.write("epoch,pearson,R2," + ','.join(loss_values.keys())+"\n")
 
                 if args.task_level == 'node':
                     csvf.write(str(epoch) + ',' + ','.join(['%.5f'%value \
                                   for value in {'success': success_rate, **loss_values}.values()])+'\n')
                 elif args.task_level == 'graph':
                     csvf.write(str(epoch) + ',' + ','.join(['%.5f'%value \
-                                  for value in {'pearson': pearson_coefficient, **loss_values}.values()])+'\n')
+                                  for value in {'pearson': pearson_coefficient, 'R2': r_squared_value, **loss_values}.values()])+'\n')
 
             if kdx == 1:
                 # check if loss value has decreased

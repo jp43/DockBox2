@@ -13,7 +13,7 @@ import networkx as nx
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold
-from dockbox2.dbxconfig import known_scoring_functions
+from dockbox2.dbxconfig import known_scoring_functions, default_features
 
 parser = argparse.ArgumentParser(description="split train and validation sets for training with DockBox2")
 
@@ -112,20 +112,18 @@ if all([isinstance(graphs[pdbid], list) and len(graphs[pdbid])==2 for pdbid in p
 else:
     pkd = None
 
-is_first = True
-# check and extract feature names
-for pdbid in pdbids: 
+# get names of scoring functions and other feats
+for idx, pdbid in enumerate(pdbids):
     G = graphs[pdbid]
     for node, data in G.nodes(data=True):
-        if is_first:
+        if idx == 0:
             data_names = data.keys()
-            feature_names = sorted([ft for ft in data if any(ft.startswith(sf) for sf in known_scoring_functions)])
-            is_first = False
+            scoring_functions = [ft for ft in data if any(ft.startswith(sf) for sf in known_scoring_functions)]
+            other_features = [ft for ft in data if ft in default_features]
         else:
-            for key in data:
-                if key not in data_names:
-                    print("Provided graphs are not consistent, %s data not found in every node"%key)  
-                    sys.exit(1)
+            if any([key not in data_names for key in data]):
+                print("Provided graphs are not consistent, %s data not found in every node"%key)  
+                sys.exit(1)
 
 # check restrictions on test set
 if is_float(args.value_test):
@@ -240,25 +238,29 @@ for kdx, datasets in enumerate(datasets_list):
 
     # normalize data
     if args.normalize:
-        feats = {ft: [] for ft in feature_names}
+        scores = {sf: [] for sf in scoring_functions}
+        if all(ft in other_features for ft in ['instance', 'score']):
+            normalize_original_scores = True
+        else:
+            normalize_original_scores = False
+
         for pdbid in datasets['train']:
             G = graphs_copy[pdbid]
-
             for node, data in G.nodes(data=True):
                 for ft, value in data.items():
-                    if ft in feature_names:
-                        feats[ft].append(value)
- 
+                    if ft in scoring_functions:
+                        scores[ft].append(value)
+
         if args.cross_validation:
             scaler_file = 'scaler_%i.pkl'%(kdx+1)
         else:
             scaler_file = 'scaler.pkl'
 
         scalers = {}
-        for ft in feature_names:
+        for sf in scoring_functions:
             scaler = StandardScaler() 
-            scaler.fit(np.array(feats[ft]).reshape(-1, 1))
-            scalers[ft] = scaler
+            scaler.fit(np.array(scores[sf]).reshape(-1, 1))
+            scalers[sf] = scaler
 
         with open(scaler_file, "wb") as ff:
             pickle.dump(scalers, ff)
@@ -267,10 +269,17 @@ for kdx, datasets in enumerate(datasets_list):
             G = graphs_copy[pdbid]
 
             for node, data in G.nodes(data=True):
-                for ft in feature_names:
-                    ft_array = np.array([[data[ft]]])
-                    normalized_feat = scalers[ft].transform(ft_array)
-                    G.nodes[node][ft] = normalized_feat[0][0]
+                # normalize scores
+                for sf in scoring_functions:
+                    sf_array = np.array([[data[sf]]])
+                    normalized_score = scalers[sf].transform(sf_array)
+                    G.nodes[node][sf] = normalized_score[0][0]
+
+                # normalize original score
+                if normalize_original_scores:
+                    sf_array = np.array([[data['score']]])
+                    normalized_score = scalers[data['instance']].transform(sf_array)
+                    G.nodes[node]['score'] = normalized_score[0][0]
 
     # save graphs and related information
     for setname, dataset_pdbids in datasets.items():

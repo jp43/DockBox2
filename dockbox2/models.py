@@ -8,11 +8,12 @@ from dockbox2.layers import *
 from dockbox2.utils import *
 
 from dockbox2 import loss as db2loss
+from dockbox2.dbxconfig import known_instances
 
 class GraphSAGE(tf.keras.models.Model):
 
     def __init__(self, in_shape, out_shape, depth, nrof_neigh, loss_options, aggregator_options, classifier_options, readout_options, \
-        edge_options, attention_options=None, task_level=False):
+        node_options, edge_options, attention_options=None, task_level=False):
 
         super(GraphSAGE, self).__init__()
 
@@ -24,6 +25,9 @@ class GraphSAGE(tf.keras.models.Model):
 
         self.aggregator_options = aggregator_options
         self.attention_options = attention_options
+
+        self.node_options = node_options
+        self.node_features = node_options['features']
 
         self.edge_options = edge_options
 
@@ -39,12 +43,12 @@ class GraphSAGE(tf.keras.models.Model):
         else:
             raise ValueError("Task level %s not recognized! Should be node or graph")
 
-        self.loss_function = self.build_classification_loss(loss_options[loss])
+        self.loss_function = self.build_loss(loss_options[loss])
         self.loss_reg_w = loss_options['loss_reg']['weight']
 
         self.task_level = task_level
 
-    def build_classification_loss(self, options):
+    def build_loss(self, options):
 
         loss_type = options.pop('type')
         loss_function = getattr(db2loss, loss_type)
@@ -52,6 +56,10 @@ class GraphSAGE(tf.keras.models.Model):
         return loss_function(**options)
 
     def build(self):
+
+        if 'instance' in self.node_features:
+            self.embedder = Embedder('Instancer', len(known_instances), self.node_features)
+            self.embedder.build()
 
         aggregator_options = self.aggregator_options
 
@@ -113,6 +121,7 @@ class GraphSAGE(tf.keras.models.Model):
 
         super(GraphSAGE, self).build(())
 
+
     def build_classifier(self, input_shape):
 
         classifier_options = self.classifier_options
@@ -143,6 +152,9 @@ class GraphSAGE(tf.keras.models.Model):
 
         for kdx in range(1, nrof_graphs):
              self_feats = tf.concat([self_feats, feats[kdx][:graph_size[kdx]]], axis=0)
+
+        if 'instance' in self.node_features:
+            self_feats = self.embedder(self_feats)
 
         for idx in range(self.depth):
             # construct neigh_feats from self_feat
@@ -241,6 +253,15 @@ class GraphSAGE(tf.keras.models.Model):
 
     def pearson(self, labels, pred_labels):
         return tfp.stats.correlation(labels, pred_labels, sample_axis=0, event_axis=1).numpy()[0][0]
+
+    def r_squared_value(self, labels, pred_labels):
+        y_mean = tf.reduce_mean(labels)
+
+        ss_total = tf.reduce_sum(tf.square(labels - y_mean))
+        ss_res = tf.reduce_sum(tf.square(labels - pred_labels))
+
+        r_squared = 1.0 - (ss_res / ss_total)
+        return r_squared
 
     def save_weights_h5(self, filename):
 

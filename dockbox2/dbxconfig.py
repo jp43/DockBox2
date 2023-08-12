@@ -7,6 +7,7 @@ import copy
 
 default_features = ['instance', 'score']
 known_scoring_functions = ['autodock', 'dock', 'dsx', 'gnina', 'moe', 'vina']
+known_instances = ['autodock', 'dock', 'moe', 'vina']
 
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
@@ -23,9 +24,9 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
               'decay_rate': {'default': 0.99, 'type': float},
               'staircase': {'default': True, 'type': bool}},
 
-'LOSSN': {'type': {'default': 'BinaryFocalCrossentropy', 'among': ['BinaryFocalCrossentropy', 'BinaryCrossEntropyLoss']},
-          'alpha': {'default': 0.5, 'type': float, 'with': ('type', 'BinaryFocalCrossentropy')},
-          'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossentropy')},
+'LOSSN': {'type': {'default': 'BinaryFocalCrossEntropy', 'among': ['BinaryFocalCrossEntropy', 'BinaryCrossEntropyLoss']},
+          'alpha': {'default': 0.5, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
+          'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
           'weight': {'default': 1.0, 'type': float}},
 
 'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError']}}, # loss function for graph_level task (pKd)
@@ -168,7 +169,8 @@ class ConfigSetup(object):
                         feats = [sf.strip() for sf in value.split(',')]
                         new_feats = []
                         for ft in feats:
-                            if ft in default_features or any([ft.startswith(sf) for sf in known_scoring_functions]):
+                            if ft in default_features or \
+                                any([ft.startswith(sf) for sf in known_scoring_functions]):
                                 new_feats.append(ft)
                             else:
                                 raise ValueError("feature %s not recognized!"%ft)

@@ -6,6 +6,7 @@ import pickle
 import networkx as nx
 import numpy as np
 
+from dockbox2.dbxconfig import known_instances
 import tensorflow as tf
 
 class GraphDataset(object):
@@ -32,14 +33,15 @@ class GraphDataset(object):
             if isinstance(graphs, nx.Graph): 
                 graphs = [graphs]
 
+        # remove edges with rmsd greater than cutoff
         if rmsd_cutoff is not None:
             new_graphs = []
-            # remove edges with rmsd greater than cutoff
-            for G in graphs:
-                discarded_edges = filter(lambda e: e[2] > rmsd_cutoff, list(G.edges.data('rmsd')))
-                G.remove_edges_from(list(discarded_edges))
 
-                new_graphs.append(G)
+            for graph in graphs:
+                discarded_edges = filter(lambda e: e[2] > rmsd_cutoff, list(graph.edges.data('rmsd')))
+                graph.remove_edges_from(list(discarded_edges))
+
+                new_graphs.append(graph)
             graphs = list(new_graphs)
  
         self.feats = []
@@ -54,7 +56,13 @@ class GraphDataset(object):
 
             # load features and labels
             for node, data in graph.nodes(data=True):
-                graph_feats.append([data[ft] for ft in feat_names])
+                feats = []
+                for ft in feat_names:
+                    if ft == 'instance':
+                        feats.append(known_instances.index(data[ft]))
+                    else:
+                        feats.append(data[ft])
+                graph_feats.append(feats)
 
                 if 'label' not in data and task_level == 'node' and not testing:
                     raise ValueError("node labels (pose correctness) not found. Required for node-level task prediction!")
@@ -81,6 +89,7 @@ class GraphDataset(object):
 
             if edge_options['type'] is None or 'rmsd' not in edge_options['type']:
                 rmsd_matrix = np.zeros_like(adj_matrix, dtype=float)
+
             elif 'rmsd' in edge_options['type']:
                 # load rmsd values as edge feats
                 rmsd_matrix = nx.to_numpy_array(graph, weight='rmsd')
