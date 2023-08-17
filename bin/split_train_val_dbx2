@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import StratifiedKFold
 from dockbox2.dbxconfig import known_scoring_functions, default_features
 
@@ -97,6 +97,11 @@ def is_float(string):
         return True
     except ValueError:
         return False
+
+# used when rescaling RMSD
+rmsd_upper_bound = 15.0
+min_rmsd_range = 5.0
+max_rmsd_range = 12.0
 
 with open(args.pkfile, "rb") as ff:
     graphs = pickle.load(ff)
@@ -236,9 +241,11 @@ for kdx, datasets in enumerate(datasets_list):
         print('training set: %i elements, validation set: %i elements'%(len(datasets['train']), len(datasets['val'])))
     print("alpha coefficient needed for balanced set: %.2f"%(1/(1+np.mean(correctness_ratio))))
 
-    # normalize data
+    # normalize node and edge features
     if args.normalize:
+        rmsd = []
         scores = {sf: [] for sf in scoring_functions}
+
         if all(ft in other_features for ft in ['instance', 'score']):
             normalize_original_scores = True
         else:
@@ -250,6 +257,8 @@ for kdx, datasets in enumerate(datasets_list):
                 for ft, value in data.items():
                     if ft in scoring_functions:
                         scores[ft].append(value)
+            rmsd_graph = np.array([data['rmsd'] for _, _, data in G.edges(data=True)])
+            rmsd.append(rmsd_graph)
 
         if args.cross_validation:
             scaler_file = 'scaler_%i.pkl'%(kdx+1)
@@ -261,6 +270,20 @@ for kdx, datasets in enumerate(datasets_list):
             scaler = StandardScaler() 
             scaler.fit(np.array(scores[sf]).reshape(-1, 1))
             scalers[sf] = scaler
+
+        # create and fit RMSD scaler
+        rmsd_scaler = MinMaxScaler()
+        #rmsd_scaler = StandardScaler()
+
+        rmsd = np.concatenate(rmsd, axis=0)
+        rmsd = np.clip(rmsd, 0., rmsd_upper_bound).reshape(-1, 1)
+        rmsd_scaler.fit(rmsd)
+        scalers['rmsd'] = rmsd_scaler
+
+        rmsd_range = np.arange(min_rmsd_range, max_rmsd_range + 1., 1.)
+        rescaled_rmsd_range = rmsd_scaler.transform(rmsd_range.reshape(-1, 1))
+        print("RMSD rescaling scale: " + ", ".join(["%.1f: %.2f"%(value, rescaled_value) for \
+            value, rescaled_value in zip(rmsd_range, rescaled_rmsd_range)]))
 
         with open(scaler_file, "wb") as ff:
             pickle.dump(scalers, ff)
@@ -280,6 +303,14 @@ for kdx, datasets in enumerate(datasets_list):
                     sf_array = np.array([[data['score']]])
                     normalized_score = scalers[data['instance']].transform(sf_array)
                     G.nodes[node]['score'] = normalized_score[0][0]
+
+            rmsd_graph = np.array([data['rmsd'] for _, _, data in G.edges(data=True)])
+            rmsd_graph = np.clip(rmsd_graph, 0., rmsd_upper_bound).reshape(-1, 1)
+            rescaled_rmsd_graph = scalers['rmsd'].transform(rmsd_graph)
+            
+            ## Update the graph with scaled RMSD
+            #for (idx, jdx), rmsd_value in zip(G.edges(), rescaled_rmsd_graph):
+            #    G[idx][jdx]['rmsd'] = rmsd_value[0]
 
     # save graphs and related information
     for setname, dataset_pdbids in datasets.items():

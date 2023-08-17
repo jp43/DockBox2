@@ -87,13 +87,8 @@ class GraphDataset(object):
             adj_matrix = nx.adjacency_matrix(graph).toarray()
             self.adj.append(adj_matrix)
 
-            if edge_options['type'] is None or 'rmsd' not in edge_options['type']:
-                rmsd_matrix = np.zeros_like(adj_matrix, dtype=float)
-
-            elif 'rmsd' in edge_options['type']:
-                # load rmsd values as edge feats
-                rmsd_matrix = nx.to_numpy_array(graph, weight='rmsd')
-
+            # load rmsd values as edge feats
+            rmsd_matrix = nx.to_numpy_array(graph, weight='rmsd')
             self.rmsd.append(rmsd_matrix)
 
         if not is_node_label:

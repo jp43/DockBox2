@@ -70,16 +70,14 @@ class GraphSAGE(tf.keras.models.Model):
         use_concat = aggregator_options['use_concat']
 
         edge_options = self.edge_options
-
-        edge_type = edge_options.pop('type')
-        edge_activation =  edge_options.pop('activation')
+        edge_activation = edge_options.pop('activation')
+        edge_depth = edge_options.pop('depth')
 
         self.edge_layers = []
         self.aggregator_layers = []
 
         for idx in range(self.depth):
-            if edge_type is not None:
-                edge_layer = Edger(idx, edge_type, edge_activation, **edge_options)
+            edge_layer = Edger(idx, edge_activation, edge_depth, **edge_options)
             aggregator_layer = Aggregator(idx, aggregator_type, aggregator_activation, use_concat, gat_options=self.attention_options)
 
             if idx == 0:
@@ -87,9 +85,8 @@ class GraphSAGE(tf.keras.models.Model):
             else:
                 in_shape = (use_concat+1)*aggregator_shape[idx-1]
 
-            if edge_type is not None:
-                edge_layer.build(in_shape)
-                self.edge_layers.append(edge_layer)
+            edge_layer.build(in_shape)
+            self.edge_layers.append(edge_layer)
 
             if aggregator_type == 'gat':
                 if self.attention_options['shape'] is None:
@@ -112,7 +109,7 @@ class GraphSAGE(tf.keras.models.Model):
             readout_activation_h = readout_options.pop('activation_h')
 
             self.readout = GraphPooler('Readout', readout_type, readout_shape, readout_activation, readout_activation_h, **readout_options)
-            self.readout.build(2*(use_concat+1)*aggregator_shape[-1])
+            self.readout.build((use_concat+1)*aggregator_shape[-1])
 
         elif self.task_level == 'node':
             self.build_classifier((use_concat+1)*aggregator_shape[-1])

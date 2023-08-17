@@ -34,16 +34,15 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
-               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'gat']},
+               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'gat', 'meanmax', 'maxmean']},
                'use_concat': {'default': True, 'type': bool},
                'use_bias': {'default': True, 'type': bool},
                'activation': {'default': 'relu'}},
 
 'GAT': {'shape': {'default': None, 'type': 'shape'},
-               'activation': {'default': 'relu'}},
+        'activation': {'default': 'relu'}},
 
-'EDGE': {'type': {'default': None, 'among': ['rmsd'], 'type': list},
-         'depth': {'default': 1, 'type': int},
+'EDGE': {'depth': {'default': 1, 'type': int},
          'use_bias': {'default': False, 'type': bool},
          'activation': {'default': 'relu'}},
 
@@ -52,7 +51,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                'activation': {'default': 'sigmoid'}},
 
 'READOUT': {'shape': {'default': '1', 'type': 'shape'},
-           'type': {'default': 'meanmax', 'among': ['meanmax']},
+           'type': {'default': 'maxpool', 'among': ['maxpool', 'meanmax']},
            'use_bias': {'default': True, 'type': bool},
            'activation_h': {'default': 'relu'},
            'activation': {'default': 'linear'}} 
