@@ -5,13 +5,14 @@ import re
 import configparser
 import copy
 
-default_features = ['instance', 'score']
+default_features = ['score']
 known_scoring_functions = ['autodock', 'dock', 'dsx', 'gnina', 'moe', 'vina']
 known_instances = ['autodock', 'dock', 'moe', 'vina']
 
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
-                               'nrof_neigh': {'default': 25, 'type': int}},
+                               'nrof_neigh': {'default': 20, 'type': int},
+                               'use_edger': {'default': True, 'type': bool}},
 
 'NODE': {'rmsd_cutoff': {'default': 7.0, 'type': float},
          'features': {'required': True, 'type': 'features'}}, 
@@ -29,12 +30,12 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
           'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
           'weight': {'default': 1.0, 'type': float}},
 
-'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError']}}, # loss function for graph_level task (pKd)
+'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError']}}, # loss function for pkd prediction
 
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
-               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'gat', 'meanmax', 'maxmean']},
+               'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'symmean', 'gat']},
                'use_concat': {'default': True, 'type': bool},
                'use_bias': {'default': True, 'type': bool},
                'activation': {'default': 'relu'}},
@@ -42,7 +43,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'GAT': {'shape': {'default': None, 'type': 'shape'},
         'activation': {'default': 'relu'}},
 
-'EDGE': {'depth': {'default': 1, 'type': int},
+'EDGER': {'depth': {'default': 1, 'type': int},
          'use_bias': {'default': False, 'type': bool},
          'activation': {'default': 'relu'}},
 
@@ -51,10 +52,10 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                'activation': {'default': 'sigmoid'}},
 
 'READOUT': {'shape': {'default': '1', 'type': 'shape'},
-           'type': {'default': 'maxpool', 'among': ['maxpool', 'meanmax']},
-           'use_bias': {'default': True, 'type': bool},
-           'activation_h': {'default': 'relu'},
-           'activation': {'default': 'linear'}} 
+            'type': {'default': 'maxpool', 'among': ['maxpool', 'meanmax']},
+            'use_bias': {'default': True, 'type': bool},
+            'activation_h': {'default': 'relu'},
+            'activation': {'default': 'linear'}}
 }
 
 
@@ -187,6 +188,7 @@ class ConfigSetup(object):
         # set general options as direct attributes
         self.epochs = parameters['GENERAL']['epochs']
         self.depth = parameters['GENERAL']['depth']
+        self.use_edger = parameters['GENERAL']['use_edger']
 
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
         self.node = parameters['NODE']
@@ -202,15 +204,18 @@ class ConfigSetup(object):
         self.gat = parameters['GAT']
 
         self.classifier = parameters['CLASSIFIER']
-        self.edge = parameters['EDGE']
+        self.edger = parameters['EDGER']
         self.readout = parameters['READOUT']
 
     def pretty_print(self, task_level='node'):
 
-        attributes = ['optimizer', 'minibatch', 'general', 'node', 'aggregator', 'edge', 'loss']
+        attributes = ['optimizer', 'minibatch', 'general', 'node', 'aggregator', 'loss']
 
         if self.aggregator['type'] == 'gat':
             attributes.append('gat')
+
+        if self.use_edger:
+            attributes.append('edger')
 
         if task_level == 'graph':
             loss_types = ['loss_g', 'loss_reg']

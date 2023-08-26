@@ -161,15 +161,16 @@ def generate_data_loader(dataset, depth, nrof_neigh, num_parallel_calls=1, batch
         data_slices = np.arange(dataset.ngraphs)
 
     data_loader = tf.data.Dataset.from_tensor_slices((data_slices))
-    data_loader = data_loader.map(**{'num_parallel_calls': num_parallel_calls, 'map_func': lambda x: dataset.sample(x, depth, nrof_neigh)})
-    data_loader = data_loader.batch(batch_size=batch_size)
+    data_loader = data_loader.map(lambda x: dataset.sample(x, depth, nrof_neigh), num_parallel_calls=num_parallel_calls, deterministic=True)
 
+    data_loader = data_loader.batch(batch_size=batch_size)
     return data_loader, data_slices
 
 def sample_neighbors(adj_matrix, rmsd_matrix, graph_size, depth, nrof_neigh):
 
     neigh_indices = []
     neigh_adj_values = []
+
     neigh_rmsd = []
     nneigh = []
 

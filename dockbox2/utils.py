@@ -15,7 +15,6 @@ def append_batch_results(values, batch_values, first=True):
         return tf.concat([values, batch_values], axis=0)
 
 def set_seed(seed):
-
     tf.random.set_seed(seed)
     np.random.seed(seed)
     random.seed(seed)

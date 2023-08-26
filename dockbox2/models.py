@@ -8,12 +8,11 @@ from dockbox2.layers import *
 from dockbox2.utils import *
 
 from dockbox2 import loss as db2loss
-from dockbox2.dbxconfig import known_instances
 
 class GraphSAGE(tf.keras.models.Model):
 
-    def __init__(self, in_shape, out_shape, depth, nrof_neigh, loss_options, aggregator_options, classifier_options, readout_options, \
-        node_options, edge_options, attention_options=None, task_level=False):
+    def __init__(self, in_shape, out_shape, depth, nrof_neigh, use_edger, loss_options, aggregator_options, classifier_options, readout_options, \
+        node_options, attention_options=None, edger_options=None, task_level=False):
 
         super(GraphSAGE, self).__init__()
 
@@ -29,7 +28,8 @@ class GraphSAGE(tf.keras.models.Model):
         self.node_options = node_options
         self.node_features = node_options['features']
 
-        self.edge_options = edge_options
+        self.use_edger = use_edger
+        self.edger_options = edger_options
 
         if task_level == 'graph':
             self.classifier_options = None
@@ -57,10 +57,6 @@ class GraphSAGE(tf.keras.models.Model):
 
     def build(self):
 
-        if 'instance' in self.node_features:
-            self.embedder = Embedder('Instancer', len(known_instances), self.node_features)
-            self.embedder.build()
-
         aggregator_options = self.aggregator_options
 
         aggregator_type = aggregator_options.pop('type')
@@ -68,25 +64,31 @@ class GraphSAGE(tf.keras.models.Model):
         
         aggregator_activation = aggregator_options.pop('activation')
         use_concat = aggregator_options['use_concat']
+        use_bias = aggregator_options['use_bias']
 
-        edge_options = self.edge_options
-        edge_activation = edge_options.pop('activation')
-        edge_depth = edge_options.pop('depth')
+        edger_options = self.edger_options
+        if self.use_edger:
+            edger_activation = edger_options.pop('activation')
+            edger_depth = edger_options.pop('depth')
 
-        self.edge_layers = []
+            self.edger_layers = []
+        else:
+            self.edger_layers = None
         self.aggregator_layers = []
 
         for idx in range(self.depth):
-            edge_layer = Edger(idx, edge_activation, edge_depth, **edge_options)
-            aggregator_layer = Aggregator(idx, aggregator_type, aggregator_activation, use_concat, gat_options=self.attention_options)
+            aggregator_layer = Aggregator(idx, aggregator_type, aggregator_activation, use_concat, self.attention_options, self.use_edger, use_bias=use_bias)
 
             if idx == 0:
                 in_shape = self.in_shape
             else:
                 in_shape = (use_concat+1)*aggregator_shape[idx-1]
 
-            edge_layer.build(in_shape)
-            self.edge_layers.append(edge_layer)
+            if self.use_edger:
+                edger_layer = Edger(idx, edger_activation, edger_depth, **edger_options)
+
+                edger_layer.build(in_shape)
+                self.edger_layers.append(edger_layer)
 
             if aggregator_type == 'gat':
                 if self.attention_options['shape'] is None:
@@ -150,11 +152,11 @@ class GraphSAGE(tf.keras.models.Model):
         for kdx in range(1, nrof_graphs):
              self_feats = tf.concat([self_feats, feats[kdx][:graph_size[kdx]]], axis=0)
 
-        if 'instance' in self.node_features:
-            self_feats = self.embedder(self_feats)
-
         for idx in range(self.depth):
-            # construct neigh_feats from self_feat
+            self_nneigh = nneigh[0, idx, :graph_size[0]]
+            for kdx in range(1, nrof_graphs):
+                self_nneigh = tf.concat([self_nneigh, nneigh[kdx, idx, :graph_size[kdx]]], axis=0)
+
             for kdx in range(nrof_graphs):
                 graph_self_feats = tf.gather(self_feats, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
                 graph_neigh_feats = tf.gather(graph_self_feats, neigh_indices[kdx][idx][:graph_size[kdx],:])
@@ -164,22 +166,26 @@ class GraphSAGE(tf.keras.models.Model):
 
                 graph_neigh_rmsd = neigh_rmsd[kdx][idx][:graph_size[kdx],:]
 
+                graph_self_nneigh = tf.gather(self_nneigh, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+                graph_neigh_nneigh = tf.gather(graph_self_nneigh, neigh_indices[kdx][idx][:graph_size[kdx],:])
+                graph_neigh_nneigh = tf.multiply(graph_neigh_adj_values, graph_neigh_nneigh)
+
                 if kdx == 0:
                     neigh_feats = graph_neigh_feats
-                    layer_neigh_rmsd = graph_neigh_rmsd
+                    edger_neigh_rmsd = graph_neigh_rmsd
+                    neigh_nneigh = graph_neigh_nneigh
                 else:
                     neigh_feats = tf.concat([neigh_feats, graph_neigh_feats], axis=0)
-                    layer_neigh_rmsd = tf.concat([layer_neigh_rmsd, graph_neigh_rmsd], axis=0)
+                    edger_neigh_rmsd = tf.concat([edger_neigh_rmsd, graph_neigh_rmsd], axis=0)
+                    neigh_nneigh = tf.concat([neigh_nneigh, graph_neigh_nneigh], axis=0)
 
-            nneigh_per_graph = []
-            for jdx, nn in enumerate(nneigh[:, idx, :]):
-                nneigh_per_graph.extend(nn[:graph_size[jdx]])
-
-            if self.edge_layers:
-                neigh_feats = self.edge_layers[idx](self_feats, neigh_feats, layer_neigh_rmsd, training=training)
+            if self.use_edger:
+                neigh_feats = self.edger_layers[idx](self_feats, neigh_feats, edger_neigh_rmsd, training=training)
+            else: # concat with edge feature at each layer
+                neigh_feats = tf.concat([neigh_feats, tf.expand_dims(edger_neigh_rmsd, axis=2)], axis=2)
 
             # update node features
-            self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, nneigh_per_graph, training=training)
+            self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, self_nneigh, neigh_nneigh, training=training)
             embedded_feats = tf.math.l2_normalize(self_feats, axis=1)
 
         if self.task_level == 'graph':
@@ -261,17 +267,16 @@ class GraphSAGE(tf.keras.models.Model):
         return r_squared
 
     def save_weights_h5(self, filename):
+        weights = self.get_weights()
 
-        weight = self.get_weights()
         with h5py.File(filename, 'w') as h5f:
-
-            for idx in range(len(weight)):
-                h5f.create_dataset('weight'+str(idx), data=weight[idx])
+            for idx, weight in enumerate(weights):
+                h5f.create_dataset('weight'+str(idx), data=weight)
 
     def load_weights_h5(self, filename):
-        weight = []
+        weights = []
         with h5py.File(filename, 'r') as h5f:
 
             for idx in range(len(h5f.keys())):
-                weight.append(h5f['weight'+str(idx)].value)
-        self.set_weights(weight)
+                weights.append(h5f['weight'+str(idx)][()])
+        self.set_weights(weights)

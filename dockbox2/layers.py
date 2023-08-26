@@ -19,12 +19,13 @@ class Edger(tf.keras.layers.Layer):
 
         self.dense_layers = tf.keras.Sequential()
 
+        output_shape = input_shape
         for idx in range(self.depth):
             if idx == 0:
                 in_shape = input_shape + 1
             else:
                 in_shape = input_shape
-            self.dense_layers.add(tf.keras.layers.Dense(input_shape, input_shape=(in_shape,), use_bias=self.use_bias, activation=self.activation))
+            self.dense_layers.add(tf.keras.layers.Dense(output_shape, input_shape=(in_shape,), use_bias=self.use_bias, activation=self.activation))
 
         self.dense_layers.build((input_shape+1, ))
         super(Edger, self).build(())
@@ -41,36 +42,9 @@ class Edger(tf.keras.layers.Layer):
         return neigh_feats
 
 
-class Embedder(tf.keras.layers.Layer):
-
-    def __init__(self, name, input_dim, node_features, activation='relu'):
-
-        super(Embedder, self).__init__(name=name)
-
-        self.input_dim = input_dim
-
-        self.node_features = node_features
-        self.activation = activation
-
-    def build(self):
-
-        self.embedding = tf.keras.layers.Embedding(self.input_dim, 1)
-        self.embedding.build((1, ))
-
-        super(Embedder, self).build(())
-
-    def call(self, self_feats):
-
-        instance_idx = self.node_features.index('instance')
-        instances = self.embedding(self_feats[:, instance_idx])
-
-        self_feats = tf.concat([self_feats[:,:instance_idx], instances, self_feats[:,instance_idx+1:]], axis=1)
-        return self_feats
-
-
 class Aggregator(tf.keras.layers.Layer):
 
-    def __init__(self, depth_idx, type, activation, use_concat, gat_options, use_bias=True):
+    def __init__(self, depth_idx, type, activation, use_concat, gat_options, use_edger, use_bias=True):
 
         name = type.capitalize() + '_agg_' + str(depth_idx) 
         super(Aggregator, self).__init__(name=name)
@@ -79,7 +53,10 @@ class Aggregator(tf.keras.layers.Layer):
         self.use_concat = use_concat
 
         self.activation = activation
+        self.depth_idx = depth_idx
+
         self.use_bias = use_bias
+        self.use_edger = use_edger
 
         if self.type == 'gat':
             self.gat_layer = GATLayer(gat_options['activation'])
@@ -93,10 +70,10 @@ class Aggregator(tf.keras.layers.Layer):
         self.self_layer = tf.keras.layers.Dense(output_shape, input_shape=(input_shape,), use_bias=self.use_bias)
         self.self_layer.build((input_shape, ))
 
-        if self.type in ['maxmean', 'meanmax']:
-            in_shape = 2*input_shape 
-        else:
+        if self.use_edger:
             in_shape = input_shape
+        else:
+            in_shape = input_shape + 1
 
         self.neigh_layer = tf.keras.layers.Dense(output_shape, input_shape=(in_shape,), use_bias=self.use_bias)
         self.neigh_layer.build((in_shape, ))
@@ -109,28 +86,23 @@ class Aggregator(tf.keras.layers.Layer):
         super(Aggregator, self).build(())
 
 
-    def call(self, self_feats, neigh_feats, nneigh, training=True):
+    def call(self, self_feats, neigh_feats, self_nneigh, neigh_nneigh, training=True):
 
         if self.type == 'maxpool':
             aggregated_feats = tf.reduce_max(neigh_feats, axis=1)
 
         elif self.type == 'mean':
-            nneigh = tf.where(tf.equal(nneigh, 0), tf.ones_like(nneigh), nneigh)
-            aggregated_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
+            self_nneigh = tf.where(tf.equal(self_nneigh, 0), tf.ones_like(self_nneigh), self_nneigh)
+            aggregated_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(self_nneigh, 1))
 
-        elif self.type == 'maxmean':
-            max_feats = tf.reduce_max(neigh_feats, axis=1)
+        elif self.type == 'symmean':
+            self_nneigh = tf.where(tf.equal(self_nneigh, 0), tf.ones_like(self_nneigh), self_nneigh)
+            self_nneigh = tf.stack([self_nneigh]*tf.shape(neigh_nneigh)[1].numpy(), axis=1)
 
-            nneigh = tf.where(tf.equal(nneigh, 0), tf.ones_like(nneigh), nneigh)
-            mean_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
-            aggregated_feats = tf.concat([max_feats, mean_feats], axis=1)
+            neigh_nneigh = tf.where(tf.equal(neigh_nneigh, 0), tf.ones_like(neigh_nneigh), neigh_nneigh)
 
-        elif self.type == 'meanmax':
-            nneigh = tf.where(tf.equal(nneigh, 0), tf.ones_like(nneigh), nneigh)
-            mean_feats = tf.divide(tf.reduce_sum(neigh_feats, axis=1), tf.expand_dims(nneigh, 1))
-
-            max_feats = tf.reduce_max(neigh_feats, axis=1)
-            aggregated_feats = tf.concat([mean_feats, max_feats], axis=1)
+            norm = tf.sqrt(tf.multiply(self_nneigh, neigh_nneigh))
+            aggregated_feats = tf.reduce_sum(tf.divide(neigh_feats, tf.expand_dims(norm, 2)), axis=1)
 
         elif self.type == 'gat':
             attention_weights = self.gat_layer(self_feats, neigh_feats, training=training)

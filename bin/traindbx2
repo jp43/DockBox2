@@ -88,19 +88,20 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     depth = config.depth
     classifier = config.classifier
     nrof_neigh = config.nrof_neigh
+    use_edger = config.use_edger
 
     if jdx == 0:    
         config.pretty_print(task_level=args.task_level)
 
     # load data for training and validation sets
-    train = GraphDataset(pkfile_train, config.node, config.edge, task_level=args.task_level)
+    train = GraphDataset(pkfile_train, config.node, config.edger, task_level=args.task_level)
     data_loader_train, data_slices_train = generate_data_loader(train, depth, nrof_neigh, **config.minibatch, randomize=True)
 
-    valid = GraphDataset(pkfile_val, config.node, config.edge, task_level=args.task_level)
+    valid = GraphDataset(pkfile_val, config.node, config.edger, task_level=args.task_level)
     data_loader_valid, data_slices_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch, randomize=True)
 
-    model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, config.loss, config.aggregator, \
-                config.classifier, config.readout, config.node, config.edge, attention_options=config.gat, task_level=args.task_level)
+    model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, use_edger, config.loss, config.aggregator, \
+                config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=args.task_level)
     model.build()
 
     if jdx == 0:
@@ -123,7 +124,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
      
             for idx_batch, data_batch in enumerate(data_loader):
                 if kdx == 0:
-                    # train model from training set
+                    # train model on training set
                     with tf.GradientTape() as tape:
                         batch_labels, batch_pred_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, batch_graph_size = \
                             model(*data_batch, training=True)
@@ -131,17 +132,16 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
 
                     grads = tape.gradient(loss['total_loss'], model.trainable_weights)
                     optimizer.apply_gradients(zip(grads, model.trainable_weights))
-
                 else:
-                    # check predictions for validation set
+                    # check predictions on validation set
                     batch_labels, batch_pred_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, batch_graph_size = \
                             model(*data_batch, training=False)
-     
+
                 is_first = True if idx_batch == 0 else False
                 labels = append_batch_results(labels, batch_labels, first=is_first)
                 pred_labels = append_batch_results(pred_labels, batch_pred_labels, first=is_first)
  
-                if args.task_level == 'node':   
+                if args.task_level == 'node':
                     best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first) 
                     pred_best_node_labels = append_batch_results(pred_best_node_labels, batch_pred_best_node_labels, first=is_first)
 
@@ -171,14 +171,14 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
                     if args.task_level == 'node':
                         csvf.write("epoch,success_rate," + ','.join(loss_values.keys())+"\n")
                     elif args.task_level == 'graph':
-                        csvf.write("epoch,pearson,R2," + ','.join(loss_values.keys())+"\n")
+                        csvf.write("epoch,pearson,r2," + ','.join(loss_values.keys())+"\n")
 
                 if args.task_level == 'node':
                     csvf.write(str(epoch) + ',' + ','.join(['%.5f'%value \
                                   for value in {'success': success_rate, **loss_values}.values()])+'\n')
                 elif args.task_level == 'graph':
                     csvf.write(str(epoch) + ',' + ','.join(['%.5f'%value \
-                                  for value in {'pearson': pearson_coefficient, 'R2': r_squared_value, **loss_values}.values()])+'\n')
+                                  for value in {'pearson': pearson_coefficient, 'r2': r_squared_value, **loss_values}.values()])+'\n')
 
             if kdx == 1:
                 # check if loss value has decreased
@@ -188,12 +188,12 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
 
                     best_labels = labels
                     best_pred_labels = pred_labels
+
+                    if args.h5file is not None:
+                        model.save_weights_h5(h5file[jdx])
                 else:
                     loc_patience += 1
         time.sleep(1)
 
     # save predicted labels for validation set
     save_predicted_labels("preds_val%s.pkl"%suffix, best_labels, best_pred_labels, graph_size, data_slices_valid)
-
-    if args.h5file is not None:
-        model.save_weights_h5(h5file[jdx])
