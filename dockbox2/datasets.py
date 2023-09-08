@@ -11,9 +11,9 @@ import tensorflow as tf
 
 class GraphDataset(object):
 
-    def __init__(self, filename, node_options, edge_options, task_level='node', testing=False):
+    def __init__(self, filename, node_options, edge_options, task_level, training=True):
 
-        self.testing = testing
+        self.training = training
         self.task_level = task_level
 
         feat_names = node_options['features']
@@ -22,13 +22,13 @@ class GraphDataset(object):
         with open(filename, "rb") as ff:
             graphs = pickle.load(ff)
 
-        if all([isinstance(graph, list) and len(graph)==2 for graph in graphs]):
+        if all([isinstance(graph, list) and len(graph) == 2 for graph in graphs]):
             self.graph_labels = np.array([pkd for graph, pkd in graphs])
             graphs = [graph for graph, pkd in graphs]
         else:
             self.graph_labels = None
-            if task_level == 'graph' and not testing:
-                raise ValueError("pKd values not found. Required for graph-level task prediction!")
+            if 'graph' in task_level and training:
+                raise ValueError("pKd values not found. Required for graph-level prediction!")
 
             if isinstance(graphs, nx.Graph): 
                 graphs = [graphs]
@@ -64,13 +64,12 @@ class GraphDataset(object):
                         feats.append(data[ft])
                 graph_feats.append(feats)
 
-                if 'label' not in data and task_level == 'node' and not testing:
-                    raise ValueError("node labels (pose correctness) not found. Required for node-level task prediction!")
-
-                if 'label' in data and is_node_label:
-                    graph_node_labels.append(data['label'])
-
-                elif 'label' not in data and not is_node_label:
+                if 'label' in data:
+                    if is_node_label:
+                        graph_node_labels.append(data['label'])
+                else:
+                    if 'node' in task_level and training:
+                        raise ValueError("node labels (pose correctness) not found. Required for node-level prediction!")
                     is_node_label = False
                     graph_node_labels = None
 

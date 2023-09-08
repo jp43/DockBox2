@@ -63,6 +63,13 @@ parser.add_argument('--task',
 # update parsers with arguments
 args = parser.parse_args()
 
+# check task level
+task_level = list(dict.fromkeys(args.task_level))
+task_level = sorted(task_level, reverse=True)
+
+if all(task not in task_level for task in ['node', 'graph']):
+    raise ValueError("Task level should be node and/or graph")
+
 if args.seed is not None:
     seed = args.seed
 else:
@@ -77,10 +84,7 @@ classifier = config.classifier
 nrof_neigh = config.nrof_neigh
 use_edger = config.use_edger
 
-#train = GraphDataset('train.pkl', config.node, config.edger, task_level=args.task_level)
-#data_loader_train, data_slices_train = generate_data_loader(train, depth, nrof_neigh, **config.minibatch, randomize=True)
-
-dataset = GraphDataset(args.pickfile, config.node, config.edger, task_level=args.task_level)
+dataset = GraphDataset(args.pickfile, config.node, config.edger, task_level, training=False)
 data_loader, data_slices = generate_data_loader(dataset, depth, nrof_neigh, **config.minibatch, randomize=True)
 
 model = models.GraphSAGE(dataset.nfeats, dataset.nlabels, depth, nrof_neigh, use_edger, config.loss, config.aggregator, \

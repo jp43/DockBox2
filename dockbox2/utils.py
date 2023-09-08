@@ -17,20 +17,21 @@ def append_batch_results(values, batch_values, first=True):
 def set_seed(seed):
     tf.random.set_seed(seed)
     np.random.seed(seed)
+
     random.seed(seed)
 
-def save_predicted_labels(filename, labels, pred_labels, graph_size, data_slices):
+def save_predicted_node_labels(filename, node_labels, pred_node_labels, graph_size, data_slices):
 
     graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
 
     results = {}
     for kdx, idx in enumerate(np.argsort(data_slices)):
 
-        graph_labels = labels[graph_cumsize[idx]:graph_cumsize[idx+1]]
-        graph_pred_labels = pred_labels[graph_cumsize[idx]:graph_cumsize[idx+1]]
+        node_labels_cg = node_labels[graph_cumsize[idx]:graph_cumsize[idx+1]]
+        pred_node_labels_cg = pred_node_labels[graph_cumsize[idx]:graph_cumsize[idx+1]]
 
-        results[kdx] = {'label': list(tf.squeeze(graph_labels).numpy()),
-                        'pred': list(tf.squeeze(graph_pred_labels).numpy())}
+        results[kdx] = {'label': list(tf.squeeze(node_labels_cg).numpy()),
+                        'pred': list(tf.squeeze(pred_node_labels_cg).numpy())}
 
     with open(filename, "wb") as ff:
         pickle.dump(results, ff)

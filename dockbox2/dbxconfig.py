@@ -12,7 +12,8 @@ known_instances = ['autodock', 'dock', 'moe', 'vina']
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
                                'nrof_neigh': {'default': 20, 'type': int},
-                               'use_edger': {'default': True, 'type': bool}},
+                               'use_edger': {'default': True, 'type': bool},
+                               'use_gradnorm': {'default': False, 'type': bool}},
 
 'NODE': {'rmsd_cutoff': {'default': 7.0, 'type': float},
          'features': {'required': True, 'type': 'features'}}, 
@@ -28,11 +29,14 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 'LOSSN': {'type': {'default': 'BinaryFocalCrossEntropy', 'among': ['BinaryFocalCrossEntropy', 'BinaryCrossEntropyLoss']},
           'alpha': {'default': 0.5, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
           'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
-          'weight': {'default': 1.0, 'type': float}},
+          'weight': {'default': 1.0, 'type': float}}, # loss function for binding mode prediction
 
-'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError']}}, # loss function for pkd prediction
+'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError']},
+          'weight': {'default': 1.0, 'type': float}}, # loss function for pkd prediction
 
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
+
+'GRADNORM': {'alpha': {'default': 0.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
                'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'symmean', 'gat']},
@@ -57,7 +61,6 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
             'activation_h': {'default': 'relu'},
             'activation': {'default': 'linear'}}
 }
-
 
 class ConfigSetup(object):
 
@@ -191,6 +194,8 @@ class ConfigSetup(object):
         self.use_edger = parameters['GENERAL']['use_edger']
 
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
+        self.use_gradnorm = parameters['GENERAL']['use_gradnorm']
+
         self.node = parameters['NODE']
 
         self.minibatch = parameters['MINIBATCH']
@@ -198,6 +203,7 @@ class ConfigSetup(object):
             'loss_g': parameters['LOSSG'],
             'loss_reg': parameters['LOSSR']}
 
+        self.gradnorm = parameters['GRADNORM']
         self.general = parameters['GENERAL']
         self.optimizer = parameters['OPTIMIZER']
         self.aggregator = parameters['AGGREGATOR']
@@ -207,7 +213,7 @@ class ConfigSetup(object):
         self.edger = parameters['EDGER']
         self.readout = parameters['READOUT']
 
-    def pretty_print(self, task_level='node'):
+    def pretty_print(self, task_level):
 
         attributes = ['optimizer', 'minibatch', 'general', 'node', 'aggregator', 'loss']
 
@@ -217,15 +223,22 @@ class ConfigSetup(object):
         if self.use_edger:
             attributes.append('edger')
 
-        if task_level == 'graph':
+        if self.use_gradnorm:
+            attributes.append('gradnorm')
+
+        if task_level == ['graph']:
             loss_types = ['loss_g', 'loss_reg']
             attributes.append('readout')
 
-        elif task_level == 'node':
+        elif task_level == ['node']:
             loss_types = ['loss_n', 'loss_reg']
             attributes.append('classifier')
+
+        elif task_level == ['node', 'graph']:
+            loss_types = ['loss_n', 'loss_g', 'loss_reg']
+            attributes.extend(['classifier', 'readout'])
         else:
-            raise ValueError("Task level %s not recognized! Should be node or graph")
+            raise ValueError("Task level %s not recognized! Should be node and/or graph")
 
         print("The following options will be used:")
         for attribute in attributes:
