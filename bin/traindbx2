@@ -176,6 +176,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
             if 'graph' in task_level:
                 pearson_coefficient = model.pearson(graph_labels, pred_graph_labels)
                 r_squared_value = model.r_squared_value(graph_labels, pred_graph_labels)
+                rmse = model.rmse(graph_labels, pred_graph_labels)
 
             # save results in .csv file
             saved_file_mode = "w" if epoch == 0 else "a"
@@ -193,7 +194,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
                         columns += "success_rate,"
 
                     if 'graph' in task_level:
-                        columns += "pearson,r2,"
+                        columns += "rmse,pearson,r2,"
                     csvf.write(columns + ','.join(loss_values.keys())+"\n")    
 
                 values = str(epoch) + ','
@@ -201,7 +202,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
                     values += '%.5f,'%success_rate
 
                 if 'graph' in task_level:       
-                    values += '%.5f,%.5f,'%(pearson_coefficient, r_squared_value)
+                    values += '%.5f,%.5f,%.5f,'%(rmse, pearson_coefficient, r_squared_value)
                 csvf.write(values + ','.join(['%.5f'%value for value in loss_values.values()])+'\n')
 
             if kdx == 1:

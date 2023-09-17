@@ -332,6 +332,9 @@ class GraphSAGE(tf.keras.models.Model):
         r_squared = 1.0 - (ss_res / ss_total)
         return r_squared
 
+    def rmse(self, labels, pred_labels):
+        return tf.sqrt(tf.reduce_mean((labels - pred_labels)**2, axis=0))
+
     def save_weights_h5(self, filename):
         weights = self.get_weights()
 

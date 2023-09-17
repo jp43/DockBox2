@@ -44,7 +44,7 @@ parser.add_argument('-o',
     required=False,
     metavar='FILE',
     default='dbx2.score',
-    help='File containing with dbx2 scores are listed')
+    help='File where dbx2 scores are listed')
 
 parser.add_argument('--seed',
     dest='seed',
@@ -55,10 +55,10 @@ parser.add_argument('--seed',
 
 parser.add_argument('--task',
     dest='task_level',
-    default='node',
-    choices=['node', 'graph'],
+    default=['node'],
+    nargs='+',
     required=False,
-    help="task-level prediction: node (pose correctness) or graph (pKd values)")
+    help="task-level prediction: node (pose correctness) and/or graph (pKd values)")
 
 # update parsers with arguments
 args = parser.parse_args()
@@ -69,6 +69,19 @@ task_level = sorted(task_level, reverse=True)
 
 if all(task not in task_level for task in ['node', 'graph']):
     raise ValueError("Task level should be node and/or graph")
+
+if task_level == ['node', 'graph']:
+    suffix, ext = os.path.splitext(args.output_file)
+    node_output_file = suffix + '_node' + ext
+    graph_output_file = suffix + '_graph' + ext
+
+elif task_level == ['node']:
+    node_output_file = args.output_file
+    graph_output_file = None
+
+else:
+    node_output_file = None
+    graph_output_file = args.output_file
 
 if args.seed is not None:
     seed = args.seed
@@ -88,65 +101,69 @@ dataset = GraphDataset(args.pickfile, config.node, config.edger, task_level, tra
 data_loader, data_slices = generate_data_loader(dataset, depth, nrof_neigh, **config.minibatch, randomize=True)
 
 model = models.GraphSAGE(dataset.nfeats, dataset.nlabels, depth, nrof_neigh, use_edger, config.loss, config.aggregator, \
-    config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=args.task_level)
+    config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level)
 model.build()
 
 model.load_weights_h5(args.h5file)
-labels, pred_labels, best_node_labels, pred_best_node_labels, is_correct_labels, graph_size = (None, None, None, None, None, None)
+node_labels, pred_node_labels, best_node_labels, pred_best_node_labels, is_correct_labels, graph_labels, pred_graph_labels, \
+                graph_size = (None, None, None, None, None, None, None, None)
 
 for idx_batch, data_batch in enumerate(data_loader):
-    batch_labels, batch_pred_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, batch_graph_size = \
-            model(*data_batch, training=False)
+    batch_node_labels, batch_pred_node_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, \
+        batch_graph_labels, batch_pred_graph_labels, batch_graph_size = model(*data_batch, training=False)
 
     is_first = True if idx_batch == 0 else False
-    labels = append_batch_results(labels, batch_labels, first=is_first)
-    pred_labels = append_batch_results(pred_labels, batch_pred_labels, first=is_first)
 
-    if args.task_level == 'node':
-         best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first)
-         pred_best_node_labels = append_batch_results(pred_best_node_labels, batch_pred_best_node_labels, first=is_first)
+    if 'node' in task_level:
+        node_labels = append_batch_results(node_labels, batch_node_labels, first=is_first)
+        pred_node_labels = append_batch_results(pred_node_labels, batch_pred_node_labels, first=is_first)
 
-         is_correct_labels = append_batch_results(is_correct_labels, batch_is_correct_labels, first=is_first)
+        best_node_labels = append_batch_results(best_node_labels, batch_best_node_labels, first=is_first)
+        pred_best_node_labels = append_batch_results(pred_best_node_labels, batch_pred_best_node_labels, first=is_first)
+
+        is_correct_labels = append_batch_results(is_correct_labels, batch_is_correct_labels, first=is_first)
+
+    if 'graph' in task_level:
+        graph_labels = append_batch_results(graph_labels, batch_graph_labels, first=is_first)
+        pred_graph_labels = append_batch_results(pred_graph_labels, batch_pred_graph_labels, first=is_first)
+
     graph_size = append_batch_results(graph_size, batch_graph_size, first=is_first)
 
 # saving output predictions
-with open(args.output_file, 'w') as outf:
-
-    if args.task_level == 'node':
+if 'node' in task_level:
+    with open(node_output_file, 'w') as outf:
         graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
  
         for kdx in range(len(graph_size)):
             if kdx != 0:
                 outf.write('\n')
-            graph_pred_labels = tf.gather(pred_labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
-            graph_labels_i = tf.gather(labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+            pred_node_labels_cg = tf.gather(pred_node_labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
+            node_labels_cg = tf.gather(node_labels, tf.range(graph_cumsize[kdx], graph_cumsize[kdx+1]))
  
-            for jdx, pred_label in enumerate(graph_pred_labels):
+            for jdx, pred_label in enumerate(pred_node_labels_cg):
                 if dataset.node_labels is not None:
-                    outf.write('%-8.5f %4i\n'%(pred_label, graph_labels_i[jdx]))
-                else:
-                    outf.write('%-8.5f\n'%label)
-
-    elif args.task_level == 'graph':
-        for jdx, pred_label in enumerate(pred_labels):
-                if dataset.graph_labels is not None:
-                    outf.write('%-8.5f %6.2f\n'%(pred_label, labels[jdx]))
+                    outf.write('%-8.5f %4i\n'%(pred_label, node_labels_cg[jdx]))
                 else:
                     outf.write('%-8.5f\n'%pred_label)
 
-if args.task_level == 'node' and dataset.node_labels is not None:
-    # printing success rate and loss if labels are provided
+if 'graph' in args.task_level:
+    with open(graph_output_file, 'w') as outf:
+        for jdx, pred_label in enumerate(pred_graph_labels):
+
+                if dataset.graph_labels is not None:
+                    outf.write('%-8.5f %6.2f\n'%(pred_label, graph_labels[jdx]))
+                else:
+                    outf.write('%-8.5f\n'%pred_label)
+
+results = {}
+if 'node' in task_level and dataset.node_labels is not None:
     success_rate = model.success_rate(best_node_labels, pred_best_node_labels, is_correct_labels)
+    results['success_rate'] = success_rate
 
-    # call loss values
-    loss_values = model.call_loss(labels, pred_labels)
-    print(','.join(['%.5f'%value for value in {'success': success_rate, **loss_values}.values()])+'\n')
+if 'graph' in task_level and dataset.graph_labels is not None:
+    results['pearson'] = model.pearson(graph_labels, pred_graph_labels)
+    results['r_squared_value'] = model.r_squared_value(graph_labels, pred_graph_labels)
+    results['rmse'] = model.rmse(graph_labels, pred_graph_labels)
 
-elif args.task_level == 'graph' and dataset.graph_labels is not None:
-    pearson_coefficient = model.pearson(labels, pred_labels)
-    r_squared_value = model.r_squared_value(labels, pred_labels)
-
-    # call loss values
-    loss_values = model.call_loss(labels, pred_labels)
-    print(','.join(['%.5f'%value for value in {'pearson': pearson_coefficient, 'r2': r_squared_value, **loss_values}.values()]))
-
+for key, values in results.items():
+    print("%s: %.3f"%(key, values))
