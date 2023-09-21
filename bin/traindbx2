@@ -90,7 +90,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
         print("random seed is set to %i"%seed)
     set_seed(args.seed)
 
-    config = dbxconfig.ConfigSetup(args.config_file)
+    config = dbxconfig.ConfigSetup(args.config_file, pkfile_train)
     
     depth = config.depth
     classifier = config.classifier

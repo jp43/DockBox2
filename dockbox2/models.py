@@ -198,17 +198,19 @@ class GraphSAGE(tf.keras.models.Model):
             self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, self_nneigh, neigh_nneigh, training=training)
             embedded_feats = tf.math.l2_normalize(self_feats, axis=1)
 
+        # extract batch labels
+        if len(node_labels.shape) > 1:
+            batch_node_labels = node_labels[0][:graph_size[0],:]
+            for kdx in range(1, nrof_graphs):
+                batch_node_labels = tf.concat([batch_node_labels, node_labels[kdx][:graph_size[kdx],:]], axis=0)
+        else:
+            batch_node_labels = np.expand_dims(node_labels, 1)
+
+        batch_graph_labels = tf.expand_dims(graph_labels, 1)
+
         if 'node' in self.task_level:
             # pass values to classifier
             batch_pred_node_labels = self.classifier(embedded_feats, training=training)
-
-            # extract batch labels
-            if len(node_labels.shape) > 1:
-                batch_node_labels = node_labels[0][:graph_size[0],:]
-                for kdx in range(1, nrof_graphs):
-                    batch_node_labels = tf.concat([batch_node_labels, node_labels[kdx][:graph_size[kdx],:]], axis=0)
-            else:
-                batch_node_labels = np.expand_dims(node_labels, 1)
 
             # extract predicted and ground-truth label of best nodes
             batch_pred_best_node_labels = np.zeros(nrof_graphs, dtype=np.float32)
@@ -232,8 +234,6 @@ class GraphSAGE(tf.keras.models.Model):
             batch_is_correct_labels = tf.convert_to_tensor(batch_is_correct_labels[:,np.newaxis])
 
         if 'graph' in self.task_level:
-            batch_graph_labels = tf.expand_dims(graph_labels, 1)
-
             # use classifier and readout
             batch_pred_graph_labels = self.readout(embedded_feats, graph_size, training=training)
 

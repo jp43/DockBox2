@@ -6,7 +6,6 @@ import pickle
 import networkx as nx
 import numpy as np
 
-from dockbox2.dbxconfig import known_instances
 import tensorflow as tf
 
 class GraphDataset(object):
@@ -22,16 +21,30 @@ class GraphDataset(object):
         with open(filename, "rb") as ff:
             graphs = pickle.load(ff)
 
-        if all([isinstance(graph, list) and len(graph) == 2 for graph in graphs]):
-            self.graph_labels = np.array([pkd for graph, pkd in graphs])
-            graphs = [graph for graph, pkd in graphs]
-        else:
+        if isinstance(graphs, nx.Graph):
+            self.graph_labels = None
+            graphs = [graphs]
+            if 'graph' in task_level and training:
+                raise ValueError("pKd values not found. Required for graph-level prediction!")
+
+        # if graphs is not a graph, it should be a list
+        elif not isinstance(graphs, list):
+            raise ValueError("Input format not recognized!")
+
+        elif all([isinstance(graph, nx.Graph) for graph in graphs]):
             self.graph_labels = None
             if 'graph' in task_level and training:
                 raise ValueError("pKd values not found. Required for graph-level prediction!")
 
-            if isinstance(graphs, nx.Graph): 
-                graphs = [graphs]
+        elif len(graphs) == 2 and isinstance(graphs[0], nx.Graph):
+            self.graph_labels = np.array([graphs[1]])
+            graphs = [graphs[0]]
+
+        elif all([isinstance(graph, list) and len(graph) == 2 for graph in graphs]):
+            self.graph_labels = np.array([pkd for graph, pkd in graphs])
+            graphs = [graph for graph, pkd in graphs]
+        else:
+            raise ValueError("Input format not recognized!")
 
         # remove edges with rmsd greater than cutoff
         if rmsd_cutoff is not None:
@@ -58,10 +71,7 @@ class GraphDataset(object):
             for node, data in graph.nodes(data=True):
                 feats = []
                 for ft in feat_names:
-                    if ft == 'instance':
-                        feats.append(known_instances.index(data[ft]))
-                    else:
-                        feats.append(data[ft])
+                    feats.append(data[ft])
                 graph_feats.append(feats)
 
                 if 'label' in data:

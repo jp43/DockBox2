@@ -90,7 +90,7 @@ else:
     print("random seed is set to %i"%seed)
 set_seed(args.seed)
 
-config = dbxconfig.ConfigSetup(args.config_file)
+config = dbxconfig.ConfigSetup(args.config_file, args.pickfile)
 
 depth = config.depth
 classifier = config.classifier
@@ -129,8 +129,8 @@ for idx_batch, data_batch in enumerate(data_loader):
 
     graph_size = append_batch_results(graph_size, batch_graph_size, first=is_first)
 
-# saving output predictions
 if 'node' in task_level:
+    # saving output predictions
     with open(node_output_file, 'w') as outf:
         graph_cumsize = np.insert(np.cumsum(graph_size), 0, 0)
  

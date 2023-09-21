@@ -3,11 +3,13 @@ import sys
 
 import re
 import configparser
+import pickle
+
+import fnmatch
+import networkx as nx
 import copy
 
-default_features = ['score']
-known_scoring_functions = ['autodock', 'dock', 'dsx', 'gnina', 'moe', 'vina']
-known_instances = ['autodock', 'dock', 'moe', 'vina']
+no_features = ['index', 'pdbid', 'pose_idx', 'mol2file', 'rmsd', 'instance', 'score']
 
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
@@ -64,13 +66,14 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 
 class ConfigSetup(object):
 
-    def __init__(self, inifile):
+    def __init__(self, inifile, datafile):
 
         self.inifile = inifile
         if not os.path.isfile(inifile):
             raise IOError("File %s does not exist!"%inifile)
 
         self.load_parameters(inifile)
+        self.get_features_names(datafile)
 
     def load_parameters(self, inifile):
 
@@ -170,14 +173,10 @@ class ConfigSetup(object):
                     elif default_options[section][option]['type'] == 'features':
                         value = parameters[section][option].strip()
                         feats = [sf.strip() for sf in value.split(',')]
-                        new_feats = []
                         for ft in feats:
-                            if ft in default_features or \
-                                any([ft.startswith(sf) for sf in known_scoring_functions]):
-                                new_feats.append(ft)
-                            else:
-                                raise ValueError("feature %s not recognized!"%ft)
-                        parameters[section][option] = sorted(new_feats)
+                            if ft in no_features:
+                                raise ValueError("%s is not recognized as feature!"%ft)
+                        parameters[section][option] = feats
 
         # remove unrelated options
         for section in default_options:
@@ -249,3 +248,37 @@ class ConfigSetup(object):
                 if attribute != 'loss' or key in loss_types:
                     options_info += str(key) + ': ' + str(value) + ', '
             print(attribute.upper()+':', options_info[:-2])
+
+    def get_features_names(self, datafile):
+
+        with open(datafile, "rb") as ff:
+            graphs = pickle.load(ff)
+
+        if isinstance(graphs, nx.Graph):
+            first_graph = graphs
+
+        # if graphs is not a graph, it should be a list
+        elif not isinstance(graphs, list):
+            raise ValueError("Input format not recognized!")
+
+        elif all([isinstance(graph, nx.Graph) for graph in graphs]):
+            first_graph = graphs[0]
+
+        elif len(graphs) == 2 and isinstance(graphs[0], nx.Graph):
+            first_graph = graphs[0]
+
+        elif all([isinstance(graph, list) and len(graph) == 2 for graph in graphs]):
+            first_graph = graphs[0][0]
+        else:
+            raise ValueError("Input format not recognized!")
+
+        feats = []
+        node, data = list(first_graph.nodes(data=True))[0]
+
+        for ft in self.node['features']:
+            fts_match = [name for name in data.keys() if fnmatch.fnmatch(name, ft)]
+            for ft_match in fts_match:
+               feats.append(ft_match)
+        self.node['features'] = feats
+
+

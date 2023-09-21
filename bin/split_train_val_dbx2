@@ -13,7 +13,8 @@ import networkx as nx
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import StratifiedKFold
-from dockbox2.dbxconfig import known_scoring_functions, default_features
+
+from dockbox2.dbxconfig import no_features
 
 parser = argparse.ArgumentParser(description="split train and validation sets for training with DockBox2")
 
@@ -118,8 +119,7 @@ for idx, pdbid in enumerate(pdbids):
     for node, data in G.nodes(data=True):
         if idx == 0:
             data_names = data.keys()
-            scoring_functions = [ft for ft in data if any(ft.startswith(sf) for sf in known_scoring_functions)]
-            other_features = [ft for ft in data if ft in default_features]
+            scoring_functions = [ft for ft in data_names if ft not in no_features]
         else:
             if any([key not in data_names for key in data]):
                 print("Provided graphs are not consistent, %s data not found in every node"%key)  
@@ -241,11 +241,6 @@ for kdx, datasets in enumerate(datasets_list):
         rmsd = []
         scores = {sf: [] for sf in scoring_functions}
 
-        if all(ft in other_features for ft in ['instance', 'score']):
-            normalize_original_scores = True
-        else:
-            normalize_original_scores = False
-
         for pdbid in datasets['train']:
             G = graphs_copy[pdbid]
             for node, data in G.nodes(data=True):
@@ -278,12 +273,6 @@ for kdx, datasets in enumerate(datasets_list):
                     sf_array = np.array([[data[sf]]])
                     normalized_score = scalers[sf].transform(sf_array)
                     G.nodes[node][sf] = normalized_score[0][0]
-
-                # normalize original score
-                if normalize_original_scores:
-                    sf_array = np.array([[data['score']]])
-                    normalized_score = scalers[data['instance']].transform(sf_array)
-                    G.nodes[node]['score'] = normalized_score[0][0]
 
     # save graphs and related information
     for setname, dataset_pdbids in datasets.items():
