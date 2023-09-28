@@ -97,7 +97,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     nrof_neigh = config.nrof_neigh
 
     use_edger = config.use_edger
-    use_gradnorm = config.use_gradnorm
+    mt_loss = config.mt_loss
 
     if jdx == 0:    
         config.pretty_print(task_level=task_level)
@@ -110,7 +110,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     data_loader_valid, data_slices_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch, randomize=True)
 
     model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, use_edger, config.loss, config.aggregator, \
-                config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level)
+        config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level, mt_loss=mt_loss)
     model.build()
 
     if jdx == 0:
@@ -140,8 +140,6 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
                             batch_graph_labels, batch_pred_graph_labels, batch_graph_size = model(*data_batch, training=True)
 
                         loss = model.call_loss(batch_node_labels, batch_pred_node_labels, batch_graph_labels, batch_pred_graph_labels)
-                        if use_gradnorm:
-                            model.gradient_normalization(tape, epoch, loss)
  
                     grads = tape.gradient(loss['total_loss'], model.trainable_weights)
                     optimizer.apply_gradients(zip(grads, model.trainable_weights))

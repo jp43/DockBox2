@@ -3,6 +3,18 @@ import tensorflow as tf
 
 _EPSILON = tf.keras.backend.epsilon()
 
+def cross_entropy(labels, preds, alpha):
+
+    labels_f = tf.dtypes.cast(labels, tf.float32)
+
+    preds_clipped = tf.clip_by_value(preds, clip_value_min=_EPSILON, clip_value_max=1-_EPSILON)
+    p_t = tf.where(tf.equal(labels_f, 1), preds_clipped, 1 - preds_clipped)
+
+    alpha_factor = tf.ones_like(labels_f) * alpha
+    alpha_t = tf.where(tf.equal(labels_f, 1), alpha_factor, 1 - alpha_factor)
+
+    return alpha_t, p_t
+
 class BinaryFocalCrossEntropy(tf.keras.losses.Loss):
 
     def __init__(self, alpha=0.5, gamma=2.0, weight=1.0):
@@ -16,14 +28,7 @@ class BinaryFocalCrossEntropy(tf.keras.losses.Loss):
 
     def call(self, labels, preds):
 
-        labels_f = tf.dtypes.cast(labels, tf.float32)
-
-        preds_clipped = tf.clip_by_value(preds, clip_value_min=_EPSILON, clip_value_max=1-_EPSILON)
-        p_t = tf.where(tf.equal(labels_f, 1), preds_clipped, 1 - preds_clipped)
-
-        alpha_factor = tf.ones_like(labels_f) * self.alpha 
-        alpha_t = tf.where(tf.equal(labels_f, 1), alpha_factor, 1 - alpha_factor)
-
+        alpha_t, p_t = cross_entropy(labels, preds, self.alpha)
         loss = -alpha_t * tf.math.pow(1 - p_t, self.gamma) * tf.math.log(p_t)
 
         return self.weight*tf.reduce_mean(loss)

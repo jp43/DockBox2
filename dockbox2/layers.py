@@ -3,6 +3,11 @@ import sys
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.keras.initializers import Constant
+from dockbox2.loss import cross_entropy
+
+_EPSILON = tf.keras.backend.epsilon()
+
 class Edger(tf.keras.layers.Layer):
 
     def __init__(self, depth_idx, activation, depth, use_bias=False):
@@ -236,4 +241,45 @@ class GATLayer(tf.keras.layers.Layer):
         weights = tf.expand_dims(weights, axis=2)
 
         return weights
+
+class MultiLossLayer(tf.keras.layers.Layer):
+
+    def __init__(self, alpha=0.5, gamma=2.0):
+
+        self.alpha = alpha
+        self.gamma = gamma
+
+        super(MultiLossLayer, self).__init__(name='MTLoss')
+
+    def build(self):
+
+        self.logvar_n = self.add_weight(name='logvar_n', shape=(1,), initializer=Constant(0.), trainable=True)
+        self.logvar_g = self.add_weight(name='logvar_g', shape=(1,), initializer=Constant(0.), trainable=True)
+
+        super(MultiLossLayer, self).build(())
+
+    def call_loss_n(self, labels, preds):
+
+        alpha_t, p_t = cross_entropy(labels, preds, self.alpha)
+
+        precision = tf.math.exp(-self.logvar_n)
+        loss = precision * (-alpha_t * tf.math.pow(1 - p_t, self.gamma) * tf.math.log(p_t)) + self.logvar_n
+
+        return tf.reduce_mean(loss)
+
+    def call_loss_g(self, labels, preds):
+
+        precision = tf.math.exp(-self.logvar_g)
+        return tf.sqrt(tf.reduce_mean(precision*(labels - preds)**2 + self.logvar_g, axis=0))
+
+    def call(self, node_labels, pred_node_labels, graph_labels, pred_graph_labels):
+
+        loss_n = self.call_loss_n(node_labels, pred_node_labels)
+        loss_g = self.call_loss_g(graph_labels, pred_graph_labels)
+
+        # not sure those two lines are needed
+        loss = loss_n + loss_g
+        self.add_loss(loss)
+
+        return loss_n, loss_g
 

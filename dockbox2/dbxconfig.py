@@ -14,8 +14,8 @@ no_features = ['index', 'pdbid', 'pose_idx', 'mol2file', 'rmsd', 'instance', 'sc
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
                                'nrof_neigh': {'default': 20, 'type': int},
-                               'use_edger': {'default': True, 'type': bool},
-                               'use_gradnorm': {'default': False, 'type': bool}},
+                               'use_edger': {'default': False, 'type': bool},
+                               'mt_loss': {'default': None, 'among': [None, 'cipolla']}},
 
 'NODE': {'rmsd_cutoff': {'default': 7.0, 'type': float},
          'features': {'required': True, 'type': 'features'}}, 
@@ -193,7 +193,7 @@ class ConfigSetup(object):
         self.use_edger = parameters['GENERAL']['use_edger']
 
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
-        self.use_gradnorm = parameters['GENERAL']['use_gradnorm']
+        self.mt_loss = parameters['GENERAL']['mt_loss']
 
         self.node = parameters['NODE']
 
@@ -221,9 +221,6 @@ class ConfigSetup(object):
 
         if self.use_edger:
             attributes.append('edger')
-
-        if self.use_gradnorm:
-            attributes.append('gradnorm')
 
         if task_level == ['graph']:
             loss_types = ['loss_g', 'loss_reg']

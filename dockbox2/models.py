@@ -12,7 +12,7 @@ from dockbox2 import loss as db2loss
 class GraphSAGE(tf.keras.models.Model):
 
     def __init__(self, in_shape, out_shape, depth, nrof_neigh, use_edger, loss_options, aggregator_options, classifier_options, readout_options, \
-        node_options, attention_options=None, edger_options=None, task_level=False):
+        node_options, attention_options=None, edger_options=None, task_level=False, mt_loss=None):
 
         super(GraphSAGE, self).__init__()
 
@@ -30,6 +30,7 @@ class GraphSAGE(tf.keras.models.Model):
 
         self.use_edger = use_edger
         self.edger_options = edger_options
+        self.loss_options = loss_options
 
         if task_level == ['node']:
             self.classifier_options = classifier_options
@@ -49,13 +50,16 @@ class GraphSAGE(tf.keras.models.Model):
             self.classifier_options = classifier_options
             self.readout_options = readout_options
 
-            self.loss_n = self.build_loss(loss_options['loss_n'])
-            self.loss_g = self.build_loss(loss_options['loss_g'])
+            if mt_loss is None:
+                self.loss_n = self.build_loss(loss_options['loss_n'])
+                self.loss_g = self.build_loss(loss_options['loss_g'])
+
         else:
             raise ValueError("Task level %s not recognized! Should be node and/or graph")
 
         self.loss_reg_w = loss_options['loss_reg']['weight']
         self.task_level = task_level
+        self.mt_loss = mt_loss
 
     def build_loss(self, options):
 
@@ -122,6 +126,16 @@ class GraphSAGE(tf.keras.models.Model):
 
         if 'node' in self.task_level:
             self.build_classifier((use_concat+1)*aggregator_shape[-1])
+
+        if 'node' in self.task_level and 'graph' in self.task_level and self.mt_loss == 'cipolla':
+            loss_n_options = self.loss_options['loss_n']
+            alpha = loss_n_options['alpha']
+            gamma = loss_n_options['gamma']
+
+            self.loss_layer = MultiLossLayer(alpha=alpha, gamma=gamma)
+            self.loss_layer.build()
+        else:
+            self.loss_layer = None
 
         super(GraphSAGE, self).build(())
 
@@ -240,74 +254,32 @@ class GraphSAGE(tf.keras.models.Model):
         return batch_node_labels, batch_pred_node_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, \
             batch_graph_labels, batch_pred_graph_labels, graph_size
 
-    def call_loss(self, node_labels, pred_node_labels, graph_labels, pred_graph_labels, regularization=True, use_gradnorm=False):
+    def call_loss(self, node_labels, pred_node_labels, graph_labels, pred_graph_labels, regularization=True):
 
-        values = {'total_loss': 0}
-        if 'node' in self.task_level:
-            loss_n = self.loss_n(node_labels, pred_node_labels)
+        if self.loss_layer is None:
+            values = {'total_loss': 0}
 
-            values['total_loss'] += loss_n
-            values['loss_n'] = loss_n
-
-        if 'graph' in self.task_level:
-            loss_g = self.loss_g(graph_labels, pred_graph_labels)
-
-            values['total_loss'] += loss_g
-            values['loss_g'] = loss_g
+            if 'node' in self.task_level:
+                loss_n = self.loss_n(node_labels, pred_node_labels)
+ 
+                values['total_loss'] += loss_n
+                values['loss_n'] = loss_n
+ 
+            if 'graph' in self.task_level:
+                loss_g = self.loss_g(graph_labels, pred_graph_labels)
+ 
+                values['total_loss'] += loss_g
+                values['loss_g'] = loss_g
+        else:
+            loss_n, loss_g = self.loss_layer(node_labels, pred_node_labels, graph_labels, pred_graph_labels)
+            values = {'total_loss': loss_n + loss_g, 'loss_n': loss_n, 'loss_g': loss_g}
 
         if regularization:
             reg_loss = self.loss_reg_w * 0.0005 * tf.add_n([tf.nn.l2_loss(w) for w in self.trainable_variables])
             values['reg_loss'] = reg_loss
+            values['total_loss'] += reg_loss
 
-        values['total_loss'] += reg_loss
         return values
-
-    def get_shared_weights(self, trainable=True):
-        """In GradNorm paper, it is said that shared weights should be the weights of the last shared layer... To be checked."""
-        shared_weights = []
-        for aggregator_layer in self.aggregator_layers:
-            if trainable:
-                shared_weights.extend(aggregator_layer.trainable_weights)
-            else:
-                shared_weights.extend(aggregator_layer.weights)
-
-        for edger_layer in self.edger_layers:
-            if trainable:
-                shared_weights.extend(edger_layer.trainable_weights)
-            else:   
-                shared_weights.extend(edger_layer.weights)
-        return shared_weights
-
-    def gradient_normalization(self, tape, epoch, loss, trainable=True):
-
-        if epoch == 0:
-            self.ln_0 = loss['loss_n']
-            self.lg_0 = loss['loss_g']
-
-        shared_weights = self.get_shared_weights(trainable=trainable)
-
-        grads_n = tape.gradient(loss['loss_n'], shared_weights)
-        norm_grads_n = tf.norm(tf.concat([tf.reshape(g, [-1]) for g in grads_n], axis=0), ord=2)
-
-        grads_g = tape.gradient(loss['loss_g'], shared_weights)
-        norm_grads_g = tf.norm(tf.concat([tf.reshape(g, [-1]) for g in grads_g], axis=0), ord=2)
-
-        G_avg = tf.div(tf.add(norm_grads_n, norm_grads_g), 2)
-
-        l_tilda_n = tf.div(loss['loss_n'], self.ln_0)
-        l_tilda_g = tf.div(loss['loss_g'], self.lg_0)
-        l_tilda_avg = tf.div(tf.add(l_tilda_n, l_tilda_g), 2)
-
-        inv_rate_n = tf.div(l_tilda_n, l_tilda_avg)
-        inv_rate_g = tf.div(l_tilda_g, l_tilda_avg)
-
-        cn = tf.multiply(G_avg, tf.pow(inv_rate_n, a))
-        cg = tf.multiply(G_avg, tf.pow(inv_rate_g, a))
- 
-        loss_gradnorm = tf.add(tf.reduce_sum(tf.abs(tf.subtract(norm_grads_n, cn))), \
-            tf.reduce_sum(tf.abs(tf.subtract(norm_grads_g, cg))))
-
-        return loss_gradnorm
 
     def success_rate(self, best_node_labels, pred_best_node_labels, is_correct_labels, threshold=0.5):
 
