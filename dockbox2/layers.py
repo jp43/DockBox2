@@ -263,14 +263,16 @@ class MultiLossLayer(tf.keras.layers.Layer):
         alpha_t, p_t = cross_entropy(labels, preds, self.alpha)
 
         precision = tf.math.exp(-self.logvar_n)
-        loss = precision * (-alpha_t * tf.math.pow(1 - p_t, self.gamma) * tf.math.log(p_t)) + self.logvar_n
+        loss = tf.reduce_mean(-alpha_t * tf.math.pow(1 - p_t, self.gamma) * tf.math.log(p_t))
 
-        return tf.reduce_mean(loss)
+        return precision * loss + self.logvar_n
 
     def call_loss_g(self, labels, preds):
 
         precision = tf.math.exp(-self.logvar_g)
-        return tf.sqrt(tf.reduce_mean(precision*(labels - preds)**2 + self.logvar_g, axis=0))
+        loss = tf.sqrt(tf.reduce_mean((labels - preds)**2, axis=0))
+
+        return 0.5 * precision * loss + self.logvar_g
 
     def call(self, node_labels, pred_node_labels, graph_labels, pred_graph_labels):
 

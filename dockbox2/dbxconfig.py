@@ -15,7 +15,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                                'depth': {'default': 2, 'type': int},
                                'nrof_neigh': {'default': 20, 'type': int},
                                'use_edger': {'default': False, 'type': bool},
-                               'mt_loss': {'default': None, 'among': [None, 'cipolla']}},
+                               'weighting': {'default': None, 'among': [None, 'uw', 'rlw']}},
 
 'NODE': {'rmsd_cutoff': {'default': 7.0, 'type': float},
          'features': {'required': True, 'type': 'features'}}, 
@@ -193,7 +193,7 @@ class ConfigSetup(object):
         self.use_edger = parameters['GENERAL']['use_edger']
 
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
-        self.mt_loss = parameters['GENERAL']['mt_loss']
+        self.weighting = parameters['GENERAL']['weighting']
 
         self.node = parameters['NODE']
 

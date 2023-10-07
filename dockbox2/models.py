@@ -12,7 +12,7 @@ from dockbox2 import loss as db2loss
 class GraphSAGE(tf.keras.models.Model):
 
     def __init__(self, in_shape, out_shape, depth, nrof_neigh, use_edger, loss_options, aggregator_options, classifier_options, readout_options, \
-        node_options, attention_options=None, edger_options=None, task_level=False, mt_loss=None):
+        node_options, attention_options=None, edger_options=None, task_level=False, weighting=None):
 
         super(GraphSAGE, self).__init__()
 
@@ -50,7 +50,7 @@ class GraphSAGE(tf.keras.models.Model):
             self.classifier_options = classifier_options
             self.readout_options = readout_options
 
-            if mt_loss is None:
+            if weighting != 'uw':
                 self.loss_n = self.build_loss(loss_options['loss_n'])
                 self.loss_g = self.build_loss(loss_options['loss_g'])
 
@@ -59,7 +59,7 @@ class GraphSAGE(tf.keras.models.Model):
 
         self.loss_reg_w = loss_options['loss_reg']['weight']
         self.task_level = task_level
-        self.mt_loss = mt_loss
+        self.weighting = weighting
 
     def build_loss(self, options):
 
@@ -127,15 +127,15 @@ class GraphSAGE(tf.keras.models.Model):
         if 'node' in self.task_level:
             self.build_classifier((use_concat+1)*aggregator_shape[-1])
 
-        if 'node' in self.task_level and 'graph' in self.task_level and self.mt_loss == 'cipolla':
+        if 'node' in self.task_level and 'graph' in self.task_level and self.weighting == 'uw':
             loss_n_options = self.loss_options['loss_n']
             alpha = loss_n_options['alpha']
             gamma = loss_n_options['gamma']
 
-            self.loss_layer = MultiLossLayer(alpha=alpha, gamma=gamma)
-            self.loss_layer.build()
+            self.layer_uw = MultiLossLayer(alpha=alpha, gamma=gamma)
+            self.layer_uw.build()
         else:
-            self.loss_layer = None
+            self.layer_uw = None
 
         super(GraphSAGE, self).build(())
 
@@ -256,12 +256,28 @@ class GraphSAGE(tf.keras.models.Model):
 
     def call_loss(self, node_labels, pred_node_labels, graph_labels, pred_graph_labels, regularization=True):
 
-        if self.loss_layer is None:
-            values = {'total_loss': 0}
+        values = {}
+        if self.task_level == ['node', 'graph'] and self.weighting == 'uw':
 
+            loss_n, loss_g = self.loss_uw(node_labels, pred_node_labels, graph_labels, pred_graph_labels)
+            values = {'total_loss': loss_n + loss_g, 'loss_n': loss_n, 'loss_g': loss_g}
+
+        elif self.task_level == ['node', 'graph'] and self.weighting == 'rlw':
+
+            weights_rlw = tf.nn.softmax(tf.random.normal((2, )))
+
+            loss_n = weights_rlw[0] * self.loss_n(node_labels, pred_node_labels)
+            loss_g = weights_rlw[1] * self.loss_g(graph_labels, pred_graph_labels)
+
+            values['total_loss'] = loss_n + loss_g
+            values['loss_n'] = loss_n
+            values['loss_g'] = loss_g
+
+        else:
+            values['total_loss'] = 0
             if 'node' in self.task_level:
                 loss_n = self.loss_n(node_labels, pred_node_labels)
- 
+
                 values['total_loss'] += loss_n
                 values['loss_n'] = loss_n
  
@@ -270,12 +286,10 @@ class GraphSAGE(tf.keras.models.Model):
  
                 values['total_loss'] += loss_g
                 values['loss_g'] = loss_g
-        else:
-            loss_n, loss_g = self.loss_layer(node_labels, pred_node_labels, graph_labels, pred_graph_labels)
-            values = {'total_loss': loss_n + loss_g, 'loss_n': loss_n, 'loss_g': loss_g}
 
         if regularization:
             reg_loss = self.loss_reg_w * 0.0005 * tf.add_n([tf.nn.l2_loss(w) for w in self.trainable_variables])
+
             values['reg_loss'] = reg_loss
             values['total_loss'] += reg_loss
 

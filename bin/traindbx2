@@ -97,7 +97,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     nrof_neigh = config.nrof_neigh
 
     use_edger = config.use_edger
-    mt_loss = config.mt_loss
+    weighting = config.weighting
 
     if jdx == 0:    
         config.pretty_print(task_level=task_level)
@@ -110,7 +110,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     data_loader_valid, data_slices_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch, randomize=True)
 
     model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, use_edger, config.loss, config.aggregator, \
-        config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level, mt_loss=mt_loss)
+        config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level, weighting=weighting)
     model.build()
 
     if jdx == 0:
