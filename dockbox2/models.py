@@ -4,6 +4,8 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 import tensorflow_probability as tfp
 
+from sklearn.metrics import roc_curve, auc
+
 from dockbox2.layers import *
 from dockbox2.utils import *
 
@@ -132,10 +134,10 @@ class GraphSAGE(tf.keras.models.Model):
             alpha = loss_n_options['alpha']
             gamma = loss_n_options['gamma']
 
-            self.layer_uw = MultiLossLayer(alpha=alpha, gamma=gamma)
-            self.layer_uw.build()
+            self.loss_uw = MultiLossLayer(alpha=alpha, gamma=gamma)
+            self.loss_uw.build()
         else:
-            self.layer_uw = None
+            self.loss_uw = None
 
         super(GraphSAGE, self).build(())
 
@@ -254,6 +256,7 @@ class GraphSAGE(tf.keras.models.Model):
         return batch_node_labels, batch_pred_node_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, \
             batch_graph_labels, batch_pred_graph_labels, graph_size
 
+
     def call_loss(self, node_labels, pred_node_labels, graph_labels, pred_graph_labels, regularization=True):
 
         values = {}
@@ -295,16 +298,86 @@ class GraphSAGE(tf.keras.models.Model):
 
         return values
 
-    def success_rate(self, best_node_labels, pred_best_node_labels, is_correct_labels, threshold=0.5):
+
+    def confusion_matrix(self, best_node_labels, pred_best_node_labels, is_correct_labels, threshold=0.5):
 
         pred_best_node_labels_i = tf.cast(tf.greater_equal(pred_best_node_labels[:, 0], threshold), tf.int32)
         pred_best_node_labels_i = tf.expand_dims(pred_best_node_labels_i, axis=1)
 
-        correct_preds = tf.logical_and(tf.equal(is_correct_labels, pred_best_node_labels_i), \
-                       tf.logical_or(tf.equal(is_correct_labels, 0), tf.equal(best_node_labels, 1)))
+        # the model correctly predicted the native pose
+        tp = tf.logical_and(tf.equal(pred_best_node_labels_i, 1), tf.equal(best_node_labels, 1))
+        tp = tf.get_static_value(tf.math.count_nonzero(tp))
 
-        nrof_correct_preds = tf.get_static_value(tf.math.count_nonzero(correct_preds))
-        return nrof_correct_preds*100./len(is_correct_labels)
+        # the model predicted a pose as native but the real one does not exist OR is different from the one predicted
+        fp = tf.logical_and(tf.equal(pred_best_node_labels_i, 1), tf.equal(best_node_labels, 0))
+        fp = tf.get_static_value(tf.math.count_nonzero(fp))
+
+        # the model correctly predicted no native poses
+        tn = tf.logical_and(tf.equal(pred_best_node_labels_i, 0), tf.equal(is_correct_labels, 0))
+        tn = tf.get_static_value(tf.math.count_nonzero(tn))
+
+        # the model predicted no native poses but the real one exists among the docked poses
+        fn = tf.logical_and(tf.equal(pred_best_node_labels_i, 0), tf.equal(is_correct_labels, 1))
+
+        fn = tf.get_static_value(tf.math.count_nonzero(fn))
+        return tp, fp, tn, fn
+
+    def success_rate(self, best_node_labels, pred_best_node_labels, is_correct_labels):
+
+        tp, fp, tn, fn = self.confusion_matrix(best_node_labels, pred_best_node_labels, is_correct_labels, threshold=0.0)
+        return tp * 100./(tp + fp)
+
+    def roc_metrics(self, best_node_labels, pred_best_node_labels, is_correct_labels, num=1000):
+
+        threshold = np.linspace(0, 1, num)
+        tpr, fpr, accuracy = ([], [], [])
+
+        for kdx, th in enumerate(threshold):
+            tp, fp, tn, fn = self.confusion_matrix(best_node_labels, pred_best_node_labels, is_correct_labels, threshold=th)
+            accuracy.append((tp + tn) * 100./(tp + tn + fp + fn))
+
+            tpr.append(tp * 1./(tp + fn))
+            fpr.append(fp * 1./(fp + tn))
+
+        #best_threshold_idx = np.argmax(np.array(tpr)-np.array(fpr))
+        best_threshold_idx = np.argmax(accuracy)
+
+        best_tpr = tpr[best_threshold_idx]
+        best_fpr = fpr[best_threshold_idx]
+        best_accuracy = accuracy[best_threshold_idx]
+
+        auc_value = auc(fpr, tpr)
+        best_threshold = threshold[best_threshold_idx]
+
+        return best_tpr, 1 - best_fpr, best_accuracy, auc_value, best_threshold
+
+    def roc_metrics_graph(self, labels, pred_labels):
+
+        fpr, tpr, threshold = roc_curve(labels[:, 0], pred_labels[:, 0])
+        auc_value = auc(fpr, tpr)
+
+        best_threshold_idx = np.argmax(tpr - fpr)
+        best_threshold = threshold[best_threshold_idx]
+        
+        pred_labels_i = tf.cast(tf.greater_equal(pred_labels[:, 0], best_threshold), tf.int32)
+        labels_i = tf.cast(labels[:,0], tf.int32)
+
+        tp = tf.math.multiply(pred_labels_i, labels_i)
+        tp = tf.get_static_value(tf.math.count_nonzero(tp))
+
+        fp = tf.math.multiply(pred_labels_i, 1 - labels_i)
+        fp = tf.get_static_value(tf.math.count_nonzero(fp))
+
+        tn = tf.math.multiply(1 - pred_labels_i, 1 - labels_i)
+        tn = tf.get_static_value(tf.math.count_nonzero(tn))
+
+        fn = tf.math.multiply(1 - pred_labels_i, labels_i)
+        fn = tf.get_static_value(tf.math.count_nonzero(fn))
+
+        best_tpr = tp * 1./ (tp + fn)
+        best_fpr = fp * 1./ (fp + tn)
+
+        return best_tpr, 1 - best_fpr, auc_value, best_threshold
 
     def pearson(self, labels, pred_labels):
         return tfp.stats.correlation(labels, pred_labels, sample_axis=0, event_axis=1).numpy()[0][0]
@@ -321,12 +394,16 @@ class GraphSAGE(tf.keras.models.Model):
     def rmse(self, labels, pred_labels):
         return tf.sqrt(tf.reduce_mean((labels - pred_labels)**2, axis=0))
 
+    def std(self, labels, pred_labels):
+        return tf.math.reduce_std(labels - pred_labels)
+
     def save_weights_h5(self, filename):
         weights = self.get_weights()
 
         with h5py.File(filename, 'w') as h5f:
             for idx, weight in enumerate(weights):
                 h5f.create_dataset('weight'+str(idx), data=weight)
+
 
     def load_weights_h5(self, filename):
         weights = []

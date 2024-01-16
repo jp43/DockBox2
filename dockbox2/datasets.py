@@ -10,7 +10,7 @@ import tensorflow as tf
 
 class GraphDataset(object):
 
-    def __init__(self, filename, node_options, edge_options, task_level, training=True):
+    def __init__(self, filename, node_options, edge_options, task_level, pkd_model, training=True):
 
         self.training = training
         self.task_level = task_level
@@ -21,28 +21,45 @@ class GraphDataset(object):
         with open(filename, "rb") as ff:
             graphs = pickle.load(ff)
 
+        # graphs is a single graph
         if isinstance(graphs, nx.Graph):
             self.graph_labels = None
             graphs = [graphs]
             if 'graph' in task_level and training:
-                raise ValueError("pKd values not found. Required for graph-level prediction!")
+                raise ValueError("Graph labels not found. Required for graph-level prediction!")
 
         # if graphs is not a graph, it should be a list
         elif not isinstance(graphs, list):
             raise ValueError("Input format not recognized!")
 
+        # graphs is a list and each element is a graph
         elif all([isinstance(graph, nx.Graph) for graph in graphs]):
             self.graph_labels = None
             if 'graph' in task_level and training:
-                raise ValueError("pKd values not found. Required for graph-level prediction!")
+                raise ValueError("Graph labels not found. Required for graph-level prediction!")
 
+        # graphs is a list with 2 elements and the first one is a graph 
+        # note that the second element is not a graph as it would have passed the previous condition
         elif len(graphs) == 2 and isinstance(graphs[0], nx.Graph):
-            self.graph_labels = np.array([graphs[1]])
-            graphs = [graphs[0]]
 
+            if 'graph' in self.task_level:
+                self.check_graph_labels([graphs[1]], pkd_model)
+                self.graph_labels = np.array([graphs[1]])
+                graphs = [graphs[0]]
+            else:
+                self.graph_labels = None
+
+        # graphs is a list and all the elements are a list with 2 elements
         elif all([isinstance(graph, list) and len(graph) == 2 for graph in graphs]):
-            self.graph_labels = np.array([pkd for graph, pkd in graphs])
-            graphs = [graph for graph, pkd in graphs]
+
+            if 'graph' in self.task_level:
+                graph_labels = [pkd for graph, pkd in graphs]
+                self.check_graph_labels(graph_labels, pkd_model)
+
+                self.graph_labels = np.array(graph_labels)
+                graphs = [graph for graph, pkd in graphs]
+            else:
+                self.graph_labels = None
         else:
             raise ValueError("Input format not recognized!")
 
@@ -57,12 +74,9 @@ class GraphDataset(object):
                 new_graphs.append(graph)
             graphs = list(new_graphs)
  
-        self.feats = []
-        self.adj = []
-        self.rmsd = []
-        self.node_labels = []
-
+        self.feats, self.adj, self.rmsd, self.node_labels = ([], [], [], [])
         is_node_label = True
+
         for kdx, graph in enumerate(graphs):
             graph_feats = []
             graph_node_labels = []
@@ -160,6 +174,22 @@ class GraphDataset(object):
 
         return tf.py_function(self.__sample, [graph_id, depth, nrof_neigh], [tf.float32, tf.int32,
                                    tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.float32])
+
+    def check_graph_labels(self, labels, pkd_model):
+
+        if not isinstance(labels, list):
+            labels = [labels]
+
+        if all(isinstance(label, float) for label in labels):
+            if pkd_model == 'classification':
+                raise ValueError("pkd classification was requested but float values were found for pkd")
+
+        elif all(isinstance(label, int) and (label == 1 or label == 0) for label in labels):
+            if pkd_model == 'regression':
+                raise ValueError("pKd regression was requested but integers values were found for pKd")
+        else:
+            raise ValueError("Graph labels should be float numbers (pKds) or integers (active/inactive)")
+
 
 def generate_data_loader(dataset, depth, nrof_neigh, num_parallel_calls=1, batch_size=1, randomize=True):
     """Create data loader to be fed to model"""

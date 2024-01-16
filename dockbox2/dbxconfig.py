@@ -9,15 +9,14 @@ import fnmatch
 import networkx as nx
 import copy
 
-no_features = ['index', 'pdbid', 'pose_idx', 'mol2file', 'rmsd', 'instance', 'score']
-
 default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
-                               'depth': {'default': 2, 'type': int},
-                               'nrof_neigh': {'default': 20, 'type': int},
-                               'use_edger': {'default': False, 'type': bool},
-                               'weighting': {'default': None, 'among': [None, 'uw', 'rlw']}},
+               'depth': {'default': 2, 'type': int},
+               'nrof_neigh': {'default': 20, 'type': int},
+               'use_edger': {'default': False, 'type': bool},
+               'weighting': {'default': None, 'among': [None, 'uw', 'rlw']},
+               'pkd_model': {'default': 'regression', 'among': ['regression', 'classification']}},
 
-'NODE': {'rmsd_cutoff': {'default': 7.0, 'type': float},
+'NODE': {'rmsd_cutoff': {'default': 8.0, 'type': float},
          'features': {'required': True, 'type': 'features'}}, 
 
 'MINIBATCH': {'batch_size': {'default': 2, 'type': int},
@@ -30,15 +29,15 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
 
 'LOSSN': {'type': {'default': 'BinaryFocalCrossEntropy', 'among': ['BinaryFocalCrossEntropy', 'BinaryCrossEntropyLoss']},
           'alpha': {'default': 0.5, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
-          'gamma': {'default': 2.0, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
+          'gamma': {'default': 1.0, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
           'weight': {'default': 1.0, 'type': float}}, # loss function for binding mode prediction
 
-'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError']},
-          'weight': {'default': 1.0, 'type': float}}, # loss function for pkd prediction
+'LOSSG': {'type': {'default': 'RootMeanSquaredError', 'among': ['RootMeanSquaredError', 'BinaryFocalCrossEntropy', 'BinaryCrossEntropyLoss']},
+          'alpha': {'default': 0.5, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
+          'gamma': {'default': 1.0, 'type': float, 'with': ('type', 'BinaryFocalCrossEntropy')},
+          'weight': {'default': 1.0, 'type': float}}, # loss function for pkd or active/inactive prediction
 
 'LOSSR': {'weight': {'default': 1.0, 'type': float}},
-
-'GRADNORM': {'alpha': {'default': 0.0, 'type': float}},
 
 'AGGREGATOR': {'shape': {'required': True, 'type': 'shape'},
                'type': {'default': 'maxpool', 'among': ['maxpool', 'mean', 'symmean', 'gat']},
@@ -64,14 +63,18 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
             'activation': {'default': 'linear'}}
 }
 
+no_features = ['index', 'pdbid', 'pose_idx', 'mol2file', 'rmsd', 'instance', 'score']
+loss_types = {'BinaryFocalCrossEntropy': int, 'BinaryCrossEntropyLoss': int, 'RootMeanSquaredError': float}
+
 class ConfigSetup(object):
 
-    def __init__(self, inifile, datafile):
+    def __init__(self, inifile, datafile, task_level):
 
         self.inifile = inifile
         if not os.path.isfile(inifile):
             raise IOError("File %s does not exist!"%inifile)
 
+        self.task_level = task_level
         self.load_parameters(inifile)
         self.get_features_names(datafile)
 
@@ -187,6 +190,26 @@ class ConfigSetup(object):
                     if parameters[section][related_option] != value:
                         parameters[section].pop(option)
 
+        # check further options
+        if 'graph' in self.task_level:
+            pkd_model = parameters['GENERAL']['pkd_model']
+            activation = parameters['READOUT']['activation']
+
+            loss = parameters['LOSSG']['type']
+            if pkd_model == 'regression':
+                if loss_types[loss] != float:
+                    raise ValueError("%s can not be used to predict pkd values"%loss)
+
+                if activation != 'linear':
+                    raise ValueError("pkd regression specified but readout activation was kept to %s"%activation)
+
+            elif pkd_model == 'classification':
+                if loss_types[loss] != int:
+                    raise ValueError("%s can not be used to predict active/inactive labels"%loss)
+
+                if activation != 'sigmoid':
+                    raise ValueError("pkd classification specified but readout activation was kept to %s"%activation)
+
         # set general options as direct attributes
         self.epochs = parameters['GENERAL']['epochs']
         self.depth = parameters['GENERAL']['depth']
@@ -194,6 +217,7 @@ class ConfigSetup(object):
 
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
         self.weighting = parameters['GENERAL']['weighting']
+        self.pkd_model = parameters['GENERAL']['pkd_model']
 
         self.node = parameters['NODE']
 
@@ -202,7 +226,6 @@ class ConfigSetup(object):
             'loss_g': parameters['LOSSG'],
             'loss_reg': parameters['LOSSR']}
 
-        self.gradnorm = parameters['GRADNORM']
         self.general = parameters['GENERAL']
         self.optimizer = parameters['OPTIMIZER']
         self.aggregator = parameters['AGGREGATOR']

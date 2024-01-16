@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 
 from tensorflow.keras.initializers import Constant
-from dockbox2.loss import cross_entropy
+from dockbox2.loss import CrossEntropy
 
 _EPSILON = tf.keras.backend.epsilon()
 
@@ -208,7 +208,6 @@ class GATLayer(tf.keras.layers.Layer):
     def build(self, input_shape, attention_shape):
 
         self.shared_layer = tf.keras.layers.Dense(attention_shape, input_shape=(input_shape,), use_bias=False)
-
         self.shared_layer.build((input_shape,))
 
         self.bn = tf.keras.layers.BatchNormalization()
@@ -260,7 +259,7 @@ class MultiLossLayer(tf.keras.layers.Layer):
 
     def call_loss_n(self, labels, preds):
 
-        alpha_t, p_t = cross_entropy(labels, preds, self.alpha)
+        alpha_t, p_t = CrossEntropy(labels, preds, self.alpha)
 
         precision = tf.math.exp(-self.logvar_n)
         loss = tf.reduce_mean(-alpha_t * tf.math.pow(1 - p_t, self.gamma) * tf.math.log(p_t))

@@ -12,7 +12,7 @@ import numpy as np
 import networkx as nx
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
 from dockbox2.dbxconfig import no_features
 
@@ -20,8 +20,22 @@ parser = argparse.ArgumentParser(description="split train and validation sets fo
 
 parser.add_argument('-g',
     dest='pkfile',
+    metavar='STR',
     required=True,
     help="pickle input file containing all the graphs")
+
+parser.add_argument('--binarize',
+    dest='binarize',
+    nargs='?',
+    const=0.0,
+    type=float,
+    help='binarize pkd values using provided value as cutoff (default cutoff: 0.0)')
+
+parser.add_argument('--blacklist',
+    dest='blackfile',
+    metavar='STR',
+    default=None,
+    help='provide list of IDs that should not be included!')
 
 parser.add_argument('--cutoff',
     dest='cutoff_correct_pose',
@@ -29,12 +43,6 @@ parser.add_argument('--cutoff',
     default=2.0,
     type=float,
     help='RMSD cutoff used to assign correctness label')
-
-parser.add_argument('--cv',
-    dest='cross_validation',
-    action="store_true",
-    default=False,
-    help='perform cross-validation (related options: nsplits)')
 
 parser.add_argument('--normalize',
     dest='normalize',
@@ -45,15 +53,15 @@ parser.add_argument('--normalize',
 parser.add_argument('--nsplits',
     dest='nsplits',
     metavar='INT',
-    default=5,
+    default=1,
     type=int,
     help='number of splits used for cross-validation')
 
-parser.add_argument('--maxgraphs',
-    dest='max_ngraphs',
-    metavar='INT',
-    type=int,
-    help='maximum number of graphs used for both training and validation')
+parser.add_argument('--nullify',
+    dest='nullify',
+    action="store_true",
+    default=False,
+    help='nullify pkd when no correct poses were generated!')
 
 parser.add_argument('--maxnodes',
     dest='max_nnodes',
@@ -64,6 +72,7 @@ parser.add_argument('--maxnodes',
 parser.add_argument('--test',
     dest='value_test',
     metavar='FLOAT/STR',
+    default='0.0',
     help='fraction assigned to test set or filename including IDs')
 
 parser.add_argument('--train',
@@ -104,18 +113,44 @@ with open(args.pkfile, "rb") as ff:
 
 # get PDBIDs from dictionnary keys
 pdbids = sorted(list(set(graphs.keys())))
+
+if args.blackfile:
+    with open(args.blackfile, 'r') as ff:
+       blacklist = ff.readlines()
+       blacklist = [pdbid.replace('\n', '') for pdbid in blacklist]
+
+    pdbids = [pdbid for pdbid in pdbids if pdbid not in blacklist]
 npdbids = len(pdbids)
 
 if all([isinstance(graphs[pdbid], list) and len(graphs[pdbid])==2 for pdbid in pdbids]):
     pkd = {pdbid: graphs[pdbid][1] for pdbid in pdbids} 
     graphs = {pdbid: graphs[pdbid][0] for pdbid in pdbids}
+
     print("pKd's values found...")
 else:
     pkd = None
 
+if pkd is not None and (args.nullify or args.binarize is not None):
+    for pdbid in pdbids:
+        G = graphs[pdbid]
+
+        if args.nullify:
+            no_correct_pose = True
+            for node, data in G.nodes(data=True):
+                if data['rmsd'] <= args.cutoff_correct_pose:
+                    no_correct_pose = False
+                    break
+
+            if no_correct_pose:
+                pkd[pdbid] = 0.0
+
+        if args.binarize is not None:
+            pkd[pdbid] = 1 if pkd[pdbid] > args.binarize else 0
+
 # get names of scoring functions and other feats
 for idx, pdbid in enumerate(pdbids):
     G = graphs[pdbid]
+
     for node, data in G.nodes(data=True):
         if idx == 0:
             data_names = data.keys()
@@ -127,17 +162,19 @@ for idx, pdbid in enumerate(pdbids):
 
 # check restrictions on test set
 if is_float(args.value_test):
-    fraction_test = float(args.value_test*npdbids)
-    ntest = int(args.fraction_test*npdbids)
+    fraction_test = float(args.value_test)
+
+    ntest = int(fraction_test * npdbids)
     pdbids_test = sorted(random.sample(pdbids, ntest))
 else:
     with open(args.value_test, 'r') as ff:
         pdbids_test = ff.readlines()
         pdbids_test = [pdbid.replace('\n', '') for pdbid in pdbids_test]
-    pdbids_test = [pdbid for pdbid in pdbids if pdbid in pdbids_test]
 
-if args.cross_validation:
-    (pdbids_train_val, labels_train_val) = ([], [])
+    pdbids_test = sorted([pdbid for pdbid in pdbids if pdbid in pdbids_test])
+
+pdbids_train_val = []
+labels_train_val = []
 
 for pdbid in pdbids:
     G = graphs[pdbid]
@@ -151,54 +188,34 @@ for pdbid in pdbids:
             data['label'] = 0
         node_labels.append(data['label'])
 
-    if args.cross_validation and pdbid not in pdbids_test:
+    if pdbid not in pdbids_test:
         pdbids_train_val.append(pdbid)
         if pkd is not None:
             # if pkd are provided, use them to construct training and validations sets
-            labels_train_val.append(float(pkd[pdbid]))
+            labels_train_val.append(pkd[pdbid])
         else:
             labels_train_val.append(np.any(np.array(node_labels)==1).astype(int))
 
-if args.max_ngraphs:
-    ratio_max_ngraphs = args.max_ngraphs*1./len(pdbids_train_val) 
-
-datasets_list = []
-if args.cross_validation:
+if args.nsplits >= 2:
     skf = StratifiedKFold(n_splits=args.nsplits, random_state=seed, shuffle=True)
 
-    if pkd is not None:
-        groups = pd.cut(labels_train_val, 10, labels=False)
-        splits = skf.split(np.zeros_like(groups), groups)
-    else:
-        splits = skf.split(np.zeros_like(labels_train_val), labels_train_val)
-
-    for idxs_train, idxs_val in splits:
-        pdbids_train = [pdbids_train_val[idx] for idx in idxs_train]
-        pdbids_val = [pdbids_train_val[idx] for idx in idxs_val]
-
-        if args.max_ngraphs and ratio_max_ngraphs < 1.:
-            ntrain = int(round(ratio_max_ngraphs*len(pdbids_train)))
-            pdbids_train = sorted(random.sample(pdbids_train, ntrain))
-
-            nval = int(round(ratio_max_ngraphs*len(pdbids_val)))
-            pdbids_val = sorted(random.sample(pdbids_val, nval))
-
-        datasets_list.append({'train': pdbids_train, 'val': pdbids_val, 'test': pdbids_test})
+elif args.nsplits == 1:
+    skf = StratifiedShuffleSplit(n_splits=args.nsplits, train_size=args.fraction_train, random_state=seed)
 else:
-    datasets = {'test': pdbids_test}
+    raise ValueError("Number of splits should be greater or equal to 1")
 
-    ntrain = int(args.fraction_train*npdbids)
-    datasets['train'] = sorted(random.sample(sorted(list(set(pdbids) - set(datasets['test']))), ntrain))
-    datasets['val'] = sorted(list(set(pdbids) - set(datasets['train']) - set(datasets['test'])))
+if pkd is not None and args.binarize is None:
+    groups = pd.cut(labels_train_val, 10, labels=False)
+    splits = skf.split(np.zeros_like(groups), groups)
+else:
+    splits = skf.split(np.zeros_like(labels_train_val), labels_train_val)
 
-    if args.max_ngraphs and ratio_max_ngraphs < 1.:
-        ntrain = int(round(ratio_max_ngraphs*len(datasets['train'])))
-        datasets['train'] = sorted(random.sample(datasets['train'], ntrains))
+datasets_list = []
+for idxs_train, idxs_val in splits:
+    pdbids_train = sorted([pdbids_train_val[idx] for idx in idxs_train])
+    pdbids_val = sorted([pdbids_train_val[idx] for idx in idxs_val])
 
-        nval = int(round(ratio_max_ngraphs*len(datasets['val'])))
-        datasets['val'] = sorted(random.sample(datasets['val'], nval))
-
-    datasets_list.append(datasets)
+    datasets_list.append({'train': pdbids_train, 'val': pdbids_val, 'test': pdbids_test})
 
 for kdx, datasets in enumerate(datasets_list):
     correctness_ratio = []
@@ -230,11 +247,23 @@ for kdx, datasets in enumerate(datasets_list):
             if false_nodes:
                 correctness_ratio.append(len(true_nodes)*1./len(false_nodes))
 
-    if args.cross_validation:
-        print('split %i: training set: %i elements, validation set: %i elements'%(kdx+1, len(datasets['train']), len(datasets['val'])))
+    if args.nsplits >= 2:
+        print('Split %i: training set: %i elements, validation set: %i elements' \
+            %(kdx+1, len(datasets['train']), len(datasets['val'])))
     else:
-        print('training set: %i elements, validation set: %i elements'%(len(datasets['train']), len(datasets['val'])))
-    print("alpha coefficient needed for balanced set: %.2f"%(1/(1+np.mean(correctness_ratio))))
+        print('Training set: %i elements, validation set: %i elements'%(len(datasets['train']), len(datasets['val'])))
+
+    print('Alpha coef. pose correctness: %.2f'%(1/(1+np.mean(correctness_ratio))))
+
+    if pkd is not None and args.binarize is not None:
+        nactives, ninactives = (0, 0)
+
+        for pdbid in datasets['train']:
+            if pkd[pdbid] == 1:
+                nactives += 1
+            else:
+                ninactives += 1
+        print('Alpha coef. actives/inactives: %.2f'%(1/(1+nactives*1./ninactives)))
 
     # normalize node and edge features
     if args.normalize:
@@ -243,14 +272,16 @@ for kdx, datasets in enumerate(datasets_list):
 
         for pdbid in datasets['train']:
             G = graphs_copy[pdbid]
+
             for node, data in G.nodes(data=True):
                 for ft, value in data.items():
                     if ft in scoring_functions:
                         scores[ft].append(value)
+
             rmsd_graph = np.array([data['rmsd'] for _, _, data in G.edges(data=True)])
             rmsd.append(rmsd_graph)
 
-        if args.cross_validation:
+        if args.nsplits >= 2:
             scaler_file = 'scaler_%i.pkl'%(kdx+1)
         else:
             scaler_file = 'scaler.pkl'
@@ -283,12 +314,15 @@ for kdx, datasets in enumerate(datasets_list):
                 G = graphs_copy[pdbid]
 
                 if jdx == 0:
-                    if args.cross_validation:
+                    if args.nsplits >= 2:
                         infofile = open('info_'+setname+'_%i.csv'%(kdx+1), 'w')
                     else:
                         infofile = open('info_'+setname+'.csv', 'w')
-                    if pkd is not None:
+
+                    if pkd is not None and args.binarize is None:
                         infofile.write("pdbid,nposes,ngraphs,ncorrect,nincorrect,pKd\n")
+                    elif pkd is not None:
+                        infofile.write("pdbid,nposes,ngraphs,ncorrect,nincorrect,active/inactive\n")
                     else:
                         infofile.write("pdbid,nposes,ngraphs,ncorrect,nincorrect\n")
     
@@ -301,8 +335,11 @@ for kdx, datasets in enumerate(datasets_list):
                 nincorrect = node_labels.count(0)
 
                 if pkd is not None:
-                    infofile.write("%s,%i,%i,%i,%i,%.2f\n"%(pdbid, nposes, ngraphs, ncorrect, nincorrect, pkd[pdbid]))
                     dataset_graphs.append([G, pkd[pdbid]])
+                    if args.binarize is None:
+                        infofile.write("%s,%i,%i,%i,%i,%.2f\n"%(pdbid, nposes, ngraphs, ncorrect, nincorrect, pkd[pdbid]))
+                    else:
+                        infofile.write("%s,%i,%i,%i,%i,%i\n"%(pdbid, nposes, ngraphs, ncorrect, nincorrect, pkd[pdbid]))
                 else:
                     infofile.write("%s,%i,%i,%i,%i\n"%(pdbid, nposes, ngraphs, ncorrect, nincorrect))
                     dataset_graphs.append(G)
@@ -310,7 +347,7 @@ for kdx, datasets in enumerate(datasets_list):
                 if jdx == len(dataset_pdbids)-1:
                     infofile.close()
 
-        if args.cross_validation:    
+        if args.nsplits >= 2:  
             filename = setname + '_%i.pkl'%(kdx+1)
         else:
             filename = setname + '.pkl'

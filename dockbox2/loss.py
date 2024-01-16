@@ -3,7 +3,8 @@ import tensorflow as tf
 
 _EPSILON = tf.keras.backend.epsilon()
 
-def cross_entropy(labels, preds, alpha):
+
+def CrossEntropy(labels, preds, alpha):
 
     labels_f = tf.dtypes.cast(labels, tf.float32)
 
@@ -15,9 +16,10 @@ def cross_entropy(labels, preds, alpha):
 
     return alpha_t, p_t
 
+
 class BinaryFocalCrossEntropy(tf.keras.losses.Loss):
 
-    def __init__(self, alpha=0.5, gamma=2.0, weight=1.0):
+    def __init__(self, alpha=0.5, gamma=1.0, weight=1.0):
 
         self.alpha = alpha
 
@@ -28,7 +30,7 @@ class BinaryFocalCrossEntropy(tf.keras.losses.Loss):
 
     def call(self, labels, preds):
 
-        alpha_t, p_t = cross_entropy(labels, preds, self.alpha)
+        alpha_t, p_t = CrossEntropy(labels, preds, self.alpha)
         loss = -alpha_t * tf.math.pow(1 - p_t, self.gamma) * tf.math.log(p_t)
 
         return self.weight*tf.reduce_mean(loss)
