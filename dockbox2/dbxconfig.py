@@ -14,7 +14,8 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
                'nrof_neigh': {'default': 20, 'type': int},
                'use_edger': {'default': False, 'type': bool},
                'weighting': {'default': None, 'among': [None, 'uw', 'rlw']},
-               'pkd_model': {'default': 'regression', 'among': ['regression', 'classification']}},
+               'pkd_model': {'default': 'regression', 'among': ['regression', 'classification']},
+               'jumping': {'default': False, 'type': bool}},
 
 'NODE': {'rmsd_cutoff': {'default': 8.0, 'type': float},
          'features': {'required': True, 'type': 'features'}}, 
@@ -63,7 +64,7 @@ default_options = {'GENERAL': {'epochs': {'required': True, 'type': int},
             'activation': {'default': 'linear'}}
 }
 
-no_features = ['index', 'pdbid', 'pose_idx', 'mol2file', 'rmsd', 'instance', 'score']
+no_features = ['index', 'pdbid', 'ligid', 'pose_idx', 'mol2file', 'rmsd', 'instance', 'score']
 loss_types = {'BinaryFocalCrossEntropy': int, 'BinaryCrossEntropyLoss': int, 'RootMeanSquaredError': float}
 
 class ConfigSetup(object):
@@ -218,6 +219,7 @@ class ConfigSetup(object):
         self.nrof_neigh = parameters['GENERAL']['nrof_neigh']
         self.weighting = parameters['GENERAL']['weighting']
         self.pkd_model = parameters['GENERAL']['pkd_model']
+        self.jumping = parameters['GENERAL']['jumping']
 
         self.node = parameters['NODE']
 

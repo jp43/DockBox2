@@ -131,7 +131,7 @@ class Aggregator(tf.keras.layers.Layer):
 
 class GraphPooler(tf.keras.layers.Layer):
 
-    def __init__(self, name, type, shape, activation, activation_h, use_bias=True):
+    def __init__(self, name, type, shape, activation, activation_h, use_bias=True, jumping=False):
 
         super(GraphPooler, self).__init__(name=name)
 
@@ -142,9 +142,10 @@ class GraphPooler(tf.keras.layers.Layer):
         self.activation_h = activation_h
 
         self.use_bias = use_bias
+        self.jumping = jumping
 
 
-    def build(self, input_shape):
+    def build(self, input_shape, jumping=True):
 
         self.dense_layers = tf.keras.Sequential()
         depth = len(self.shape)

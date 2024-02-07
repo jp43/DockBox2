@@ -99,6 +99,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     use_edger = config.use_edger
     weighting = config.weighting
     pkd_model = config.pkd_model
+    jumping = config.jumping
 
     if jdx == 0:    
         config.pretty_print(task_level=task_level)
@@ -111,7 +112,8 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
     data_loader_valid, data_slices_valid = generate_data_loader(valid, depth, nrof_neigh, **config.minibatch, randomize=True)
 
     model = models.GraphSAGE(train.nfeats, train.nlabels, depth, nrof_neigh, use_edger, config.loss, config.aggregator, \
-        config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level, weighting=weighting)
+        config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level, \
+        weighting=weighting, jumping=jumping)
     model.build()
 
     if jdx == 0:
@@ -169,8 +171,8 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
             loss_values = model.call_loss(node_labels, pred_node_labels, graph_labels, pred_graph_labels)
 
             if 'node' in task_level:
-                tpr, fpr, tnr, accuracy, auc, threshold = model.roc_metrics(best_node_labels, pred_best_node_labels, is_correct_labels)
-                success_rate = model.success_rate_docking(best_node_labels, pred_best_node_labels, is_correct_labels)
+                accuracy, auc, threshold = model.roc_metrics(best_node_labels, pred_best_node_labels, is_correct_labels)
+                success_rate = model.success_rate(best_node_labels, pred_best_node_labels, is_correct_labels)
 
             if 'graph' in task_level:
                 if pkd_model == 'regression':
@@ -179,7 +181,7 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
                     r_squared_value = model.r_squared_value(graph_labels, pred_graph_labels)
                     rmse = model.rmse(graph_labels, pred_graph_labels)
                 else:
-                    tpr_g, fpr_g, auc_g, threshold_g = model.roc_metrics_graph(graph_labels, pred_graph_labels)
+                    auc_g, threshold_g = model.roc_metrics_graph(graph_labels, pred_graph_labels)
 
             # save results in .csv file
             saved_file_mode = "w" if epoch == 0 else "a"
@@ -194,24 +196,24 @@ for jdx, (pkfile_train, pkfile_val) in enumerate(zip(args.pkfiles_t, args.pkfile
                     columns = "epoch,"
 
                     if 'node' in task_level:
-                        columns += "success_rate,acccuracy,auc,tpr,fpr,"
+                        columns += "success_rate,acccuracy,auc,"
 
                     if 'graph' in task_level:
                         if pkd_model == 'regression':
                             columns += "rmse,pearson,r2,"
                         else:
-                            columns += "auc_g,tpr_g,fpr_g,"
+                            columns += "auc_g,"
                     csvf.write(columns + ','.join(loss_values.keys())+"\n")
 
                 values = str(epoch) + ','
                 if 'node' in task_level:
-                    values += '%.1f,%.1f,%.3f,%.3f,%.3f,'%(success_rate, acccuracy, auc, tpr, fpr)
+                    values += '%.1f,%.1f,%.3f,'%(success_rate, accuracy, auc)
 
                 if 'graph' in task_level:
                     if pkd_model == 'regression':
                         values += '%.3f,%.3f,%.3f,'%(rmse, pearson_coefficient, r_squared_value)
                     else:
-                        values += '%.3f,%.3f,%.3f,'%(auc_g, tpr_g, fpr_g)
+                        values += '%.3f,'%(auc_g)
 
                 csvf.write(values + ','.join(['%.5f'%value for value in loss_values.values()])+'\n')
 

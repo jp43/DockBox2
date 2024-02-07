@@ -99,12 +99,14 @@ use_edger = config.use_edger
 
 weighting = config.weighting
 pkd_model = config.pkd_model
+jumping = config.jumping
 
 dataset = GraphDataset(args.pickfile, config.node, config.edger, task_level, pkd_model, training=False)
 data_loader, data_slices = generate_data_loader(dataset, depth, nrof_neigh, **config.minibatch, randomize=False)
 
 model = models.GraphSAGE(dataset.nfeats, dataset.nlabels, depth, nrof_neigh, use_edger, config.loss, config.aggregator, \
-    config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level, weighting=weighting)
+    config.classifier, config.readout, config.node, attention_options=config.gat, edger_options=config.edger, task_level=task_level, \
+        weighting=weighting, jumping=jumping)
 model.build()
 
 model.load_weights_h5(args.h5file)
@@ -160,13 +162,11 @@ if 'graph' in args.task_level:
 
 results = {}
 if 'node' in task_level and dataset.node_labels is not None:
-    tpr, tnr, accuracy, auc, threshold = model.roc_metrics(best_node_labels, pred_best_node_labels, is_correct_labels)
+    accuracy, auc, threshold = model.roc_metrics(best_node_labels, pred_best_node_labels, is_correct_labels)
     success_rate = model.success_rate(best_node_labels, pred_best_node_labels, is_correct_labels)
 
     results['success_rate'] = "%.1f"%success_rate
     results['accuracy'] = "%.1f"%accuracy
-    results['tpr'] = "%.3f"%tpr
-    results['tnr'] = "%.3f"%tnr
 
     results['auc'] = "%.3f"%auc
     results['threshold'] = "%.3f"%threshold
@@ -180,10 +180,7 @@ if 'graph' in task_level and dataset.graph_labels is not None:
         results['rmse'] = "%.3f"%model.rmse(graph_labels, pred_graph_labels)
         results['std'] = "%.3f"%model.std(graph_labels, pred_graph_labels)
     else:
-        tpr_g, tnr_g, auc_g, threshold_g = model.roc_metrics_graph(graph_labels, pred_graph_labels) 
-
-        results['tpr_g'] = "%.3f"%tpr_g
-        results['tnr_g'] = "%.3f"%tnr_g
+        auc_g, threshold_g = model.roc_metrics_graph(graph_labels, pred_graph_labels) 
 
         results['auc_g'] = "%.3f"%auc_g
         results['threshold_g'] = "%.3f"%threshold_g

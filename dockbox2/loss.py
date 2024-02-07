@@ -3,7 +3,6 @@ import tensorflow as tf
 
 _EPSILON = tf.keras.backend.epsilon()
 
-
 def CrossEntropy(labels, preds, alpha):
 
     labels_f = tf.dtypes.cast(labels, tf.float32)

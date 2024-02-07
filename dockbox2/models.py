@@ -14,7 +14,7 @@ from dockbox2 import loss as db2loss
 class GraphSAGE(tf.keras.models.Model):
 
     def __init__(self, in_shape, out_shape, depth, nrof_neigh, use_edger, loss_options, aggregator_options, classifier_options, readout_options, \
-        node_options, attention_options=None, edger_options=None, task_level=False, weighting=None):
+        node_options, attention_options=None, edger_options=None, task_level=False, weighting=None, jumping=False):
 
         super(GraphSAGE, self).__init__()
 
@@ -55,13 +55,13 @@ class GraphSAGE(tf.keras.models.Model):
             if weighting != 'uw':
                 self.loss_n = self.build_loss(loss_options['loss_n'])
                 self.loss_g = self.build_loss(loss_options['loss_g'])
-
         else:
             raise ValueError("Task level %s not recognized! Should be node and/or graph")
 
         self.loss_reg_w = loss_options['loss_reg']['weight']
         self.task_level = task_level
         self.weighting = weighting
+        self.jumping = jumping
 
     def build_loss(self, options):
 
@@ -124,10 +124,19 @@ class GraphSAGE(tf.keras.models.Model):
             readout_activation_h = readout_options.pop('activation_h')
 
             self.readout = GraphPooler('Readout', readout_type, readout_shape, readout_activation, readout_activation_h, **readout_options)
-            self.readout.build((use_concat+1)*aggregator_shape[-1])
+
+            if self.jumping:
+                in_shape = self.in_shape + sum([(use_concat+1)*shape for shape in aggregator_shape])
+            else:
+                in_shape = (use_concat+1)*aggregator_shape[-1]
+            self.readout.build(in_shape)
 
         if 'node' in self.task_level:
-            self.build_classifier((use_concat+1)*aggregator_shape[-1])
+            if self.jumping:
+                in_shape = self.in_shape + sum([(use_concat+1)*shape for shape in aggregator_shape])
+            else:
+                in_shape = (use_concat+1)*aggregator_shape[-1]
+            self.build_classifier(in_shape)
 
         if 'node' in self.task_level and 'graph' in self.task_level and self.weighting == 'uw':
             loss_n_options = self.loss_options['loss_n']
@@ -162,6 +171,7 @@ class GraphSAGE(tf.keras.models.Model):
             self.classifier.add(tf.keras.layers.Dense(classifier_options['shape'][idx], input_shape=(in_shape,), use_bias=True, activation=activation))
         self.classifier.build((input_shape,))
 
+
     def call(self, feats, graph_size, neigh_indices, neigh_adj_values, neigh_rmsd, nneigh, node_labels, graph_labels, training=True):
 
         (batch_pred_node_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, batch_pred_graph_labels) = \
@@ -175,6 +185,9 @@ class GraphSAGE(tf.keras.models.Model):
 
         for kdx in range(1, nrof_graphs):
              self_feats = tf.concat([self_feats, feats[kdx][:graph_size[kdx]]], axis=0)
+
+        if self.jumping:
+            self_feats_all = tf.identity(self_feats)
 
         for idx in range(self.depth):
             self_nneigh = nneigh[0, idx, :graph_size[0]]
@@ -212,6 +225,13 @@ class GraphSAGE(tf.keras.models.Model):
 
             # update node features
             self_feats = self.aggregator_layers[idx](self_feats, neigh_feats, self_nneigh, neigh_nneigh, training=training)
+
+            if self.jumping:
+                self_feats_all = tf.concat([self_feats_all, self_feats], axis=1)
+
+        if self.jumping:
+            embedded_feats = tf.math.l2_normalize(self_feats_all, axis=1)
+        else:
             embedded_feats = tf.math.l2_normalize(self_feats, axis=1)
 
         # extract batch labels
@@ -250,7 +270,6 @@ class GraphSAGE(tf.keras.models.Model):
             batch_is_correct_labels = tf.convert_to_tensor(batch_is_correct_labels[:,np.newaxis])
 
         if 'graph' in self.task_level:
-            # use classifier and readout
             batch_pred_graph_labels = self.readout(embedded_feats, graph_size, training=training)
 
         return batch_node_labels, batch_pred_node_labels, batch_best_node_labels, batch_pred_best_node_labels, batch_is_correct_labels, \
@@ -298,28 +317,23 @@ class GraphSAGE(tf.keras.models.Model):
 
         return values
 
-
     def confusion_matrix(self, best_node_labels, pred_best_node_labels, is_correct_labels, threshold=0.5):
 
         pred_best_node_labels_i = tf.cast(tf.greater_equal(pred_best_node_labels[:, 0], threshold), tf.int32)
         pred_best_node_labels_i = tf.expand_dims(pred_best_node_labels_i, axis=1)
 
-        # the model correctly predicted the native pose
         tp = tf.logical_and(tf.equal(pred_best_node_labels_i, 1), tf.equal(best_node_labels, 1))
         tp = tf.get_static_value(tf.math.count_nonzero(tp))
 
-        # the model predicted a pose as native but the real one does not exist OR is different from the one predicted
         fp = tf.logical_and(tf.equal(pred_best_node_labels_i, 1), tf.equal(best_node_labels, 0))
         fp = tf.get_static_value(tf.math.count_nonzero(fp))
 
-        # the model correctly predicted no native poses
         tn = tf.logical_and(tf.equal(pred_best_node_labels_i, 0), tf.equal(is_correct_labels, 0))
         tn = tf.get_static_value(tf.math.count_nonzero(tn))
 
-        # the model predicted no native poses but the real one exists among the docked poses
         fn = tf.logical_and(tf.equal(pred_best_node_labels_i, 0), tf.equal(is_correct_labels, 1))
-
         fn = tf.get_static_value(tf.math.count_nonzero(fn))
+
         return tp, fp, tn, fn
 
     def success_rate(self, best_node_labels, pred_best_node_labels, is_correct_labels):
@@ -339,17 +353,13 @@ class GraphSAGE(tf.keras.models.Model):
             tpr.append(tp * 1./(tp + fn))
             fpr.append(fp * 1./(fp + tn))
 
-        #best_threshold_idx = np.argmax(np.array(tpr)-np.array(fpr))
         best_threshold_idx = np.argmax(accuracy)
-
-        best_tpr = tpr[best_threshold_idx]
-        best_fpr = fpr[best_threshold_idx]
         best_accuracy = accuracy[best_threshold_idx]
 
         auc_value = auc(fpr, tpr)
         best_threshold = threshold[best_threshold_idx]
 
-        return best_tpr, 1 - best_fpr, best_accuracy, auc_value, best_threshold
+        return best_accuracy, auc_value, best_threshold
 
     def roc_metrics_graph(self, labels, pred_labels):
 
@@ -359,25 +369,7 @@ class GraphSAGE(tf.keras.models.Model):
         best_threshold_idx = np.argmax(tpr - fpr)
         best_threshold = threshold[best_threshold_idx]
         
-        pred_labels_i = tf.cast(tf.greater_equal(pred_labels[:, 0], best_threshold), tf.int32)
-        labels_i = tf.cast(labels[:,0], tf.int32)
-
-        tp = tf.math.multiply(pred_labels_i, labels_i)
-        tp = tf.get_static_value(tf.math.count_nonzero(tp))
-
-        fp = tf.math.multiply(pred_labels_i, 1 - labels_i)
-        fp = tf.get_static_value(tf.math.count_nonzero(fp))
-
-        tn = tf.math.multiply(1 - pred_labels_i, 1 - labels_i)
-        tn = tf.get_static_value(tf.math.count_nonzero(tn))
-
-        fn = tf.math.multiply(1 - pred_labels_i, labels_i)
-        fn = tf.get_static_value(tf.math.count_nonzero(fn))
-
-        best_tpr = tp * 1./ (tp + fn)
-        best_fpr = fp * 1./ (fp + tn)
-
-        return best_tpr, 1 - best_fpr, auc_value, best_threshold
+        return auc_value, best_threshold
 
     def pearson(self, labels, pred_labels):
         return tfp.stats.correlation(labels, pred_labels, sample_axis=0, event_axis=1).numpy()[0][0]
@@ -403,7 +395,6 @@ class GraphSAGE(tf.keras.models.Model):
         with h5py.File(filename, 'w') as h5f:
             for idx, weight in enumerate(weights):
                 h5f.create_dataset('weight'+str(idx), data=weight)
-
 
     def load_weights_h5(self, filename):
         weights = []
