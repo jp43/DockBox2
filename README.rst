@@ -2,6 +2,11 @@
 DockBox2
 ********
 
+.. image:: https://github.com/jp43/DockBox2/blob/main/Table_of_content_jpg.jpg?raw=true
+   :alt: Table of contents
+   :align: center
+   :width: 900px
+
 Graph Neural Network Model to improve docking predictions
 
 DockBox2 (DBX2) is a sequel to DockBox that combines the concept of consensus docking with machine
@@ -40,3 +45,141 @@ Finally, the DockBox2 package can be set up by going in DockBox2 installation di
  
 Installation is complete!
 
+Procedure
+************
+
+**[1] Split data and retrain the model**
+
+ **[1.1] Split the training data**
+
+The trained models and training data are available at https://doi.org/10.5281/zenodo.17254874. The training data were prepared from PDBbind2016, as mentioned in the paper (https://www.pdbbind-plus.org.cn/).
+
+To re-train the model, the training data need to be split into training, validation, and test sets by using the "split_train_val_dbx2" command:
+
+::
+
+ split_train_val_dbx2 -g <training data> --normalize  --cutoff <A> --maxnodes <B> --seed <C> --train <D> 
+
+
+- <training data>: training data prepared as graphs (.pkl format).
+
+- <A>: the RMSD cutoff used to assign correctness labels.
+
+- <B>: the maximum number of poses per graph in the training set.
+
+- <C>: the random seed.
+
+- <D>: the fraction of data assigned to the training set.
+
+For example;
+
+::
+
+ split_train_val_dbx2 -g graphs.pkl --normalize --cutoff 2.0 --maxnodes 70 --seed 123 --train 0.9
+
+
+This will automatically split the training data into training, validation, and test sets, and provide the Alpha coefficient for pose correctness. After this step, three pickle files will be generated (e.g., train.pkl, val.pkl, test.pkl).
+
+ **[1.2] Re-train the model**
+
+The model can be re-train by using the following command:
+
+:: 
+
+ traindbx2 -f <A> -t <B> -v <C> -p <D> --seed <E> --task <F> -w <G>
+
+- <A>: the configuration file (e.g., config.ini) that provides all settings for training and prediction.
+
+- <B> and <C>: the graphs for training and validating the model, generated from [1].
+
+- <D>: the patience value used for early stopping (default = 3).
+
+- <E>: the random seed.
+
+- <F>: the task level for training the model (default = node). Recommended to use node level so the model can predict both binding pose (node level) and binding affinity (graph level).
+
+- <G>: the name of the trained model, saved as an .h5 file.
+
+For example;
+
+::
+
+ traindbx2 -f config.ini -t train.pkl -v val.pkl -p 4 --seed 123 --task node graph -w model_w.h5
+
+**[2] Create graph for DBX2 prediction**
+
+DBX2 is a GNN model that learns and makes predictions based on pose ensembles. Therefore, users need to generate multiple protein–ligand binding poses and calculate the pairwise RMSD (i.e., the RMSD differences between each binding pose).
+
+ **[2.1] Generation of protein–ligand binding poses and rescoring**
+
+In order to create graphs for prediction with DBX2, users may need to perform molecular docking to generate multiple binding poses for each protein–ligand complex using various docking software (e.g., AutoDock, Vina, Gnina, DOCK, etc.). We recommend using DBX1 (https://github.com/jp43/DockBox
+), as it can automatically perform molecular docking and rescoring. After molecular docking, the generated binding poses need to be rescored with several docking software.
+
+We're recommended to generate a total of 80-140 poses for each protein-ligand:
+
+For example;
+
+- Total of 140 poses: 60 from AutoDock, 20 from Vina, 60 from DOCK
+
+- Total of 80 poses: 60 from AutoDock, 20 from Vina
+
+The final data for create graph need to save as csv file, and the example csv file can be see as **"results.csv"** file in the (https://doi.org/10.5281/zenodo.17254874).
+
+Importantly, all poses need to be rescored with Vina, as all energetic features for the node features must be calculated by Vina (e.g., gauss1_inter, gauss2_inter, gauss1_intra, gauss2_intra, hydrophobic_inter, hydrophobic_intra, etc.). All these energetic features should be saved as CSV file in a directory named **vina_scores**. For example, the files should be named vina_scores_001.csv, vina_scores_002.csv, etc. (but if you have not that much number of protein-ligand system, you can then just give only 1 file "vina_scores_001.csv"), inside the vina_scores directory. An example CSV file for energetic features can be seen in **vina_scores.tar** (https://doi.org/10.5281/zenodo.17254874). 
+
+**Make sure that the mol2file entries match between the Vina CSV files (vina_scores_<number>.csv) and the docking CSV (results.csv). This is important because the script generates graphs by matching data from the mol2file column.**
+
+ **[2.2] Calculate the pairwise RMSD for each pose**
+
+As DBX2 need to generate graph for each protein-ligand complex, and each binding pose (node) need to connect via RMSD different between each pose. Therefore, the pairwise RMSD between each pose of each protein-ligand system is then need to calculate.
+
+The pairwise RMSD can be calculate by using **openbabel** (e.g., command: obrms {pose_x} {pose_y}), the pairwise RMSD of each pose need to save as csv and kept in a directory name **rmsd**, similar to vina. The example of RMSD file can be seen in **rmsd.tar**
+
+ **[2.3] Create graph for DBX2**
+
+Before creating graph for DBX2, you will need to make sure that:
+
+- **"results.csv"**: Contains docking/rescoring results. It is located in the same directory as the rmsd and vina_scores directories. Example file "results.csv" in https://doi.org/10.5281/zenodo.17254874.
+- **Directory name "vina_scores"**: that consists of energetic features from Vina as csv file (with pattern name of "vina_scores_<number>.csv"; vina_scores_001.csv), example file name "vina_scores.tar" in https://doi.org/10.5281/zenodo.17254874.
+- **Directory name "rmsd"**: that consists of pairwise RMSD (with pattern name of "rmsd_<number>.csv"; rmsd_001.csv), example file name "rmsd.tar" in https://doi.org/10.5281/zenodo.17254874.
+
+::
+
+ For_prediction
+ ├── results.csv
+ ├── vina_scores/
+ │   ├── vina_scores_001.csv
+ │   ├── vina_scores_002.csv
+ │   └── ...
+ └── rmsd/
+     ├── rmsd_001.csv
+     ├── rmsd_002.csv
+     └── ...
+
+Then generate graph using "create_graphs.py" in https://doi.org/10.5281/zenodo.17254874. This will create graph for DBX2 name "Pred_graph.pkl".
+
+**[3] Prediction**
+
+To run prediction, user can run with command "rundbx2":
+
+::
+
+ rundbx2 -f <A> -w <B> -t <C> --task <D> --seed 123 -o <E>
+
+ - <A>: is the config file that used during training the model (config.ini).
+
+ - <B>: is a trained model.
+
+ - <C>: is graph that generated from step **<2.3>**.
+
+ - <D>: is a level for DBX2 to predict.
+
+ - <E>: is a prediction result as .score file.
+
+For example;
+
+::
+
+ rundbx2 -f config.ini -w model_w.h5 -t Pred_grap.pkl --task graph node --seed 123 -o Pred.score
+
+This will give "Pred_node.score" and "Pred_graph.score" for protein-ligand binding pose and binding affinity prediction.
